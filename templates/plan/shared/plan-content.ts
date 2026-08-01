@@ -3160,7 +3160,7 @@ export function applyPlanContentPatches(
           );
         }
         const result = updateWireframeNode(
-          block.data.screen,
+          block.data.screen ?? [],
           patch.nodeId,
           (node) => ({ ...node, ...patch.patch }),
         );

@@ -36,7 +36,10 @@ import {
 } from "react";
 
 import { Button } from "@/components/ui/button";
-import { usePlanPresence } from "@/hooks/use-plan-presence";
+import {
+  EMPTY_PLAN_PRESENCE,
+  usePlanPresence,
+} from "@/hooks/use-plan-presence";
 import { cn } from "@/lib/utils";
 
 import {
@@ -121,6 +124,8 @@ type PlanContentRendererProps = {
   sourceUrl?: string | null;
   visualSurfaceMode?: PlanVisualSurfaceMode;
   onVisualSurfaceModeChange?: (mode: PlanVisualSurfaceMode) => void;
+  /** Disable every collaboration request in the standalone localhost editor. */
+  localOnly?: boolean;
 };
 
 /**
@@ -197,6 +202,7 @@ export function PlanContentRenderer({
   showCodeAnnotationOverlays = false,
   recapScreenshotTheme = null,
   sourceUrl,
+  localOnly = false,
 }: PlanContentRendererProps) {
   const t = useT();
   // Deep-link scroll on load/reload/back-forward (TOC clicks aside).
@@ -221,12 +227,13 @@ export function PlanContentRenderer({
         : undefined,
     [collabUser?.email, collabUser?.name, collabUser?.color],
   );
+  const remotePresence = usePlanPresence({
+    planId,
+    enabled: !localOnly && !!planId && !isRecap,
+    user: presenceUser,
+  });
   const { activeUsers, agentPresent, agentActive, recentEdits, collabDoc } =
-    usePlanPresence({
-      planId,
-      enabled: !!planId && !isRecap,
-      user: presenceUser,
-    });
+    localOnly ? EMPTY_PLAN_PRESENCE : remotePresence;
   const documentRegionRef = useRef<HTMLDivElement>(null);
   const resolvePlanEditRect = useCallback(
     (edit: AttributedRecentEdit): DOMRect | null => {

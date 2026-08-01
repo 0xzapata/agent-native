@@ -722,9 +722,11 @@ function sanitizeBlock(block: PlanBlock): PlanBlock {
     };
   }
   if (block.type === "diagram") {
+    const data = sanitizeDiagramData(block.data);
+    if (!data) return block;
     return {
       ...block,
-      data: sanitizeDiagramData(block.data),
+      data,
     };
   }
   if (block.type === "question-form" || block.type === "visual-questions") {
@@ -979,11 +981,11 @@ function mergeDesignMetadata(
   const incoming = createDesignMetadata(input);
   const styleSources = [
     ...(existing?.styleSources ?? []),
-    ...(incoming.styleSources ?? []),
+    ...(incoming?.styleSources ?? []),
   ];
   return {
     ...(existing ?? {}),
-    ...incoming,
+    ...(incoming ?? {}),
     ...(styleSources.length > 0 ? { styleSources } : {}),
   };
 }
@@ -1622,7 +1624,7 @@ export function createPrototypeFromPlanContent(
     initialScreenId: screens[0]?.id,
     screens: addConvertedPrototypeRouteControls(screens, transitions),
     transitions,
-  });
+  })!;
 }
 
 function createPrototypeFromScreens(input: {
@@ -1690,7 +1692,7 @@ function createPrototypeFromScreens(input: {
         from: remapScreenId(transition.from),
         to: remapScreenId(transition.to),
       })) ?? createLinearTransitions(normalizedScreens),
-  });
+  })!;
 }
 
 function createPrototypeScreenHtml(input: {
@@ -3513,7 +3515,7 @@ function renderDiagramHtml(data: PlanDiagramBlock["data"]) {
 
 function renderKitWireframeHtml(data: PlanWireframeBlock["data"]): string {
   const surface = escapeHtml(data.surface || "desktop");
-  const screen = data.screen.map(renderKitNodeHtml).join("");
+  const screen = (data.screen ?? []).map(renderKitNodeHtml).join("");
   const caption = data.caption
     ? `<p class="caption">${escapeHtml(data.caption)}</p>`
     : "";

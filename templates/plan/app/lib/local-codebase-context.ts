@@ -715,7 +715,7 @@ export async function chooseLocalCodebase(): Promise<LocalCodebasePickerResult> 
     return {
       ok: true,
       handle,
-      id: sameExisting ? existing.id : newCodebaseId(handle.name),
+      id: sameExisting && existing ? existing.id : newCodebaseId(handle.name),
       name: handle.name,
     };
   } catch (err) {

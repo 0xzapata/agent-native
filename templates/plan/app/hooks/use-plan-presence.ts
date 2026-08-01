@@ -74,3 +74,12 @@ export function usePlanPresence(options: {
     collabDoc: { ydoc, awareness, isSynced },
   };
 }
+
+/** Local-only editor adapter: no collaboration transport or hosted presence. */
+export const EMPTY_PLAN_PRESENCE: UsePlanPresenceResult = {
+  activeUsers: [],
+  agentPresent: false,
+  agentActive: false,
+  recentEdits: [],
+  collabDoc: { ydoc: null, awareness: null, isSynced: false },
+};

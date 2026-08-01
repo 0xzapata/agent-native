@@ -1,10 +1,10 @@
 {
   "extends": "@agent-native/core/tsconfig.base.json",
   "compilerOptions": {
-    // TODO: flip after in-flight work lands (fenced concurrent agent work)
     "strict": false,
-    "ignoreDeprecations": "6.0",
-    "rootDirs": [".", "./.react-router/types"],
+    "strictNullChecks": true,
+    "ignoreDeprecations": "5.0",
+    "rootDirs": [".", "./.tanstack/tmp"],
     "paths": {
       "*": ["./*"],
       "@/*": ["./app/*"],
@@ -12,12 +12,17 @@
     }
   },
   "include": [
-    "app/**/*",
-    "server/**/*",
+    "src/**/*",
+    "app/components/**/*",
+    "app/design-system.ts",
+    "app/global.css",
+    "app/hooks/use-plan-presence.ts",
+    "app/i18n/**/*",
+    "app/lib/utils.ts",
     "shared/**/*",
+    "server/plan-content.ts",
+    "server/plan-mdx.ts",
     "vite.config.ts",
-    "react-router.config.ts",
-    ".react-router/types/**/*",
-    ".generated/**/*"
+    ".tanstack/tmp/**/*"
   ]
 }
