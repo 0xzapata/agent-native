@@ -104,13 +104,13 @@ test("complete local plan exercises edit, canvas, prototype, comments, asset, st
 
     const title = page.locator('[aria-label="Plan title"]');
     await title.click();
-    await page.keyboard.press("Meta+A");
+    await page.keyboard.press("ControlOrMeta+A");
     await page.keyboard.type(titleText);
     await page.keyboard.press("Enter");
 
     const summary = page.locator('[aria-label="Plan summary"]');
     await summary.click();
-    await page.keyboard.press("Meta+A");
+    await page.keyboard.press("ControlOrMeta+A");
     await page.keyboard.type(summaryText);
     await page.keyboard.press("Enter");
 

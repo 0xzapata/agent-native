@@ -70,6 +70,26 @@ describe("local comment API", () => {
     );
   });
 
+  it("preserves a stale comments revision conflict", async () => {
+    const conflict = {
+      error: "Revision conflict.",
+      revisions: { "comments.json": "revision-3" },
+    };
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(
+        new Response(JSON.stringify(conflict), {
+          status: 409,
+          headers: { "content-type": "application/json" },
+        }),
+      ),
+    );
+
+    await expect(
+      saveComments("session-1", [], "revision-2"),
+    ).rejects.toMatchObject({ status: 409, payload: conflict });
+  });
+
   it("sends the opaque session to an agent without browser plan details", async () => {
     const fetch = vi.fn().mockResolvedValue(
       new Response(
@@ -87,10 +107,10 @@ describe("local comment API", () => {
       threadId: "task-1",
       url: "codex://threads/task-1",
     });
-    expect(fetch).toHaveBeenCalledWith(
+    expect(fetch.mock.calls[0]).toEqual([
       "/api/sessions/session-1/agent/send",
-      expect.objectContaining({ method: "POST" }),
-    );
+      { method: "POST", headers: {} },
+    ]);
   });
 
   it("publishes the opaque session and returns its tailnet URL", async () => {
@@ -106,9 +126,9 @@ describe("local comment API", () => {
     await expect(publishPlanToTailnet("session-1")).resolves.toEqual({
       url: "https://mac.example.ts.net:8443/plans/session-1",
     });
-    expect(fetch).toHaveBeenCalledWith(
+    expect(fetch.mock.calls[0]).toEqual([
       "/api/sessions/session-1/publish",
-      expect.objectContaining({ method: "POST" }),
-    );
+      { method: "POST", headers: {} },
+    ]);
   });
 });

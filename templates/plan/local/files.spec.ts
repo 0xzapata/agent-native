@@ -2,7 +2,7 @@ import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
   canonicalPlanRoot,
@@ -158,6 +158,35 @@ describe("local editor filesystem service", () => {
     expect(await fs.readFile(path.join(root, "canvas.mdx"), "utf8")).toBe(
       external,
     );
+  });
+
+  it("keeps a successful write when a later bundle write fails", async () => {
+    const canvas =
+      '<DesignBoard title="A"><Artboard id="a" x={0} y={0} /></DesignBoard>\n';
+    await fs.writeFile(path.join(root, "canvas.mdx"), canvas);
+    const nextPlan = PLAN.replace("Local plan body.", "Bundle edit.");
+    const nextCanvas = canvas.replace('title="A"', 'title="B"');
+    const rename = fs.rename.bind(fs);
+    let writes = 0;
+    const renameSpy = vi
+      .spyOn(fs, "rename")
+      .mockImplementation(async (...args) => {
+        await rename(...args);
+        writes += 1;
+        if (writes === 2) {
+          throw new Error("second write failed");
+        }
+      });
+
+    const error = await saveFiles(root, {
+      "plan.mdx": { content: nextPlan, revision: revision(PLAN) },
+      "canvas.mdx": { content: nextCanvas, revision: revision(canvas) },
+    }).catch((value) => value);
+    expect(error).toBeInstanceOf(Error);
+    expect(await fs.readFile(path.join(root, "plan.mdx"), "utf8")).toBe(
+      nextPlan,
+    );
+    renameSpy.mockRestore();
   });
 
   it("round-trips comments with revisions", async () => {

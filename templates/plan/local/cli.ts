@@ -39,7 +39,7 @@ async function hashTree(
   hash = createHash("sha256"),
 ): Promise<ReturnType<typeof createHash>> {
   for (const entry of (await fs.readdir(root, { withFileTypes: true })).sort(
-    (a, b) => a.name.localeCompare(b.name),
+    (a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0),
   )) {
     if (
       ["node_modules", ".git", ".output", "dist", ".react-router"].includes(
@@ -127,23 +127,30 @@ function processExists(pid: number): boolean {
   }
 }
 
-async function outputExists(): Promise<boolean> {
-  const targets = [
-    path.join(appDir, ".output", "public", "index.html"),
-    path.join(appDir, "dist", "client", "index.html"),
-    path.join(appDir, "dist", "index.html"),
-    path.join(appDir, "dist", "server", "server.js"),
-  ];
-  if (packagedRuntime)
-    targets.push(path.join(appDir, "dist", "server", "server.mjs"));
-  for (const target of targets) {
-    try {
-      if ((await fs.stat(target)).isFile()) return true;
-    } catch {
-      // Keep looking.
-    }
+async function waitUntilStopped(pid: number): Promise<void> {
+  for (let attempt = 0; attempt < 50; attempt++) {
+    const status = await healthy();
+    if (!status.ok || status.pid !== pid) return;
+    await new Promise((resolve) => setTimeout(resolve, 50));
   }
-  return false;
+  throw new Error(`Daemon PID ${pid} did not release port ${PORT}.`);
+}
+
+async function outputExists(): Promise<boolean> {
+  try {
+    const client = await fs.stat(path.join(appDir, "dist", "client"));
+    const server = await fs.stat(
+      path.join(
+        appDir,
+        "dist",
+        "server",
+        packagedRuntime ? "server.mjs" : "server.js",
+      ),
+    );
+    return client.isDirectory() && server.isFile();
+  } catch {
+    return false;
+  }
 }
 
 async function run(command: string, args: string[]): Promise<void> {
@@ -182,11 +189,12 @@ async function start(expectedHash: string): Promise<{ token: string }> {
   if (live.ok) {
     if (!old || live.pid !== old.pid)
       throw new Error(`Port ${PORT} is occupied by another healthy service.`);
-    await fetch(`http://${HOST}:${PORT}/api/shutdown`, {
+    const response = await fetch(`http://${HOST}:${PORT}/api/shutdown`, {
       method: "POST",
       headers: { authorization: `Bearer ${old.token}` },
     });
-    await new Promise((resolve) => setTimeout(resolve, 150));
+    if (!response.ok) throw new Error("Daemon rejected shutdown.");
+    await waitUntilStopped(old.pid);
   } else if (old && processExists(old.pid)) {
     throw new Error(
       `Recorded daemon PID ${old.pid} is alive but unhealthy; inspect ${old.logFile}.`,
@@ -322,7 +330,11 @@ async function commandStop(): Promise<void> {
   const metadata = await readMetadata();
   const live = await healthy();
   if (!metadata || !live.ok || live.pid !== metadata.pid) {
-    if (!metadata || !processExists(metadata.pid)) {
+    if (metadata && processExists(metadata.pid)) {
+      throw new Error(
+        `Recorded daemon PID ${metadata.pid} is alive but unhealthy; inspect ${metadata.logFile}.`,
+      );
+    } else {
       await fs.rm(metadataPath(), { force: true });
       await fs.rm(sessionsPath(), { force: true });
     }
@@ -334,6 +346,7 @@ async function commandStop(): Promise<void> {
     headers: { authorization: `Bearer ${metadata.token}` },
   });
   if (!response.ok) throw new Error("Daemon rejected shutdown.");
+  await waitUntilStopped(metadata.pid);
   await fs.rm(metadataPath(), { force: true });
   await fs.rm(sessionsPath(), { force: true });
   process.stdout.write("stopped\n");

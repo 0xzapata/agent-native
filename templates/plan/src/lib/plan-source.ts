@@ -1,7 +1,7 @@
+import { planContentSchema } from "@shared/plan-content";
 import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
 
-import { planContentSchema } from "@shared/plan-content";
 import {
   parseSimpleFrontmatter,
   exportPlanContentToMdxFolder,
@@ -12,11 +12,17 @@ import { restoreLocalAssetPaths } from "./asset-paths";
 
 type UnvalidatedPlanContent = Parameters<typeof restoreLocalAssetPaths>[0];
 
+const traversablePlanContentSchema = z
+  .object({
+    blocks: z.array(z.record(z.string(), z.unknown())),
+  })
+  .passthrough();
+
 const serializeInput = z.object({
   sessionId: z.string().min(1),
   // Local asset URLs are expanded to session API paths in the browser. Restore
   // them before applying the upstream content schema.
-  content: z.unknown(),
+  content: traversablePlanContentSchema,
   files: z.object({
     "plan.mdx": z.string().min(1),
     "canvas.mdx": z.string().optional(),
@@ -25,7 +31,7 @@ const serializeInput = z.object({
   }),
 });
 
-function replaceFrontmatterValue(
+export function replaceFrontmatterValue(
   source: string,
   key: "title" | "brief",
   value: string | undefined,
@@ -41,11 +47,25 @@ function replaceFrontmatterValue(
     : `${before}\n${key}: ${JSON.stringify(value)}${after}`;
 }
 
+export function preserveOriginalFrontmatter(
+  original: string,
+  exported: string,
+): string {
+  if (!original.startsWith("---\n")) return exported;
+  const end = original.indexOf("\n---", 4);
+  if (end < 0) return exported;
+  const exportedBody = parseSimpleFrontmatter(exported).content;
+  return `${original.slice(0, end + 4)}\n${exportedBody}`;
+}
+
 export const serializeLocalPlan = createServerFn({ method: "POST" })
   .validator((value) => serializeInput.parse(value))
   .handler(async ({ data }) => {
     const content = planContentSchema.parse(
-      restoreLocalAssetPaths(data.content as UnvalidatedPlanContent, data.sessionId),
+      restoreLocalAssetPaths(
+        data.content as UnvalidatedPlanContent,
+        data.sessionId,
+      ),
     );
     const original = parseSimpleFrontmatter(data.files["plan.mdx"]);
     const exported = await exportPlanContentToMdxFolder({
@@ -53,12 +73,10 @@ export const serializeLocalPlan = createServerFn({ method: "POST" })
       title: content.title ?? "Local plan",
       brief: content.brief,
     });
-    const exportedBody = parseSimpleFrontmatter(exported["plan.mdx"]).content;
-    const originalFrontmatterEnd = data.files["plan.mdx"].indexOf("\n---", 4);
-    let planMdx =
-      originalFrontmatterEnd >= 0
-        ? `${data.files["plan.mdx"].slice(0, originalFrontmatterEnd + 4)}\n\n${exportedBody}`
-        : exported["plan.mdx"];
+    let planMdx = preserveOriginalFrontmatter(
+      data.files["plan.mdx"],
+      exported["plan.mdx"],
+    );
     if (content.title !== original.data.title) {
       planMdx = replaceFrontmatterValue(planMdx, "title", content.title);
     }

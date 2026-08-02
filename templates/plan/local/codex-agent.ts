@@ -42,6 +42,7 @@ export function createCodexAgentClient(
   >();
   let turnToClose: { threadId: string; turnId: string } | null = null;
   let turnTimer: NodeJS.Timeout | null = null;
+  let stderr = "";
   const completedTurns = new Set<string>();
 
   const turnKey = (threadId: string, turnId: string) =>
@@ -61,13 +62,18 @@ export function createCodexAgentClient(
     if (closed) return;
     closed = true;
     if (turnTimer) clearTimeout(turnTimer);
+    turnTimer = null;
     rejectPending(new Error("Codex app-server exited."));
     child.kill();
   };
   const fail = (message: string) => {
     if (closed) return;
     closed = true;
-    rejectPending(new Error(message));
+    if (turnTimer) clearTimeout(turnTimer);
+    turnTimer = null;
+    rejectPending(
+      new Error(stderr.trim() ? `${message} ${stderr.trim()}` : message),
+    );
     child.kill();
   };
   const handleLine = (line: string) => {
@@ -126,7 +132,16 @@ export function createCodexAgentClient(
     output = lines.pop() ?? "";
     for (const line of lines) if (line.trim()) handleLine(line);
   });
-  child.stderr.resume();
+  child.stderr.on("data", (chunk: Buffer | string) => {
+    stderr = `${stderr}${chunk.toString()}`.slice(-8 * 1024);
+  });
+  child.stdin.on("error", (error: NodeJS.ErrnoException) =>
+    fail(
+      error.code === "EPIPE"
+        ? "Codex app-server could not accept the request."
+        : "Codex app-server input failed.",
+    ),
+  );
   child.once("error", () => fail("Codex CLI could not be started."));
   child.once("exit", () => fail("Codex app-server exited."));
 
@@ -155,6 +170,8 @@ export function createCodexAgentClient(
       if (!closed) write({ jsonrpc: "2.0", method, params });
     },
     closeAfterTurn(threadId, turnId) {
+      if (turnTimer) clearTimeout(turnTimer);
+      turnTimer = null;
       turnToClose = { threadId, turnId };
       const key = turnKey(threadId, turnId);
       if (completedTurns.delete(key)) {

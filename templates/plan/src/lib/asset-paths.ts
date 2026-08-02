@@ -6,7 +6,10 @@ function mapBlocks(
 ): PlanBlock[] {
   return blocks.map((block): PlanBlock => {
     if (block.type === "image" && block.data.url) {
-      return { ...block, data: { ...block.data, url: transform(block.data.url) } };
+      return {
+        ...block,
+        data: { ...block.data, url: transform(block.data.url) },
+      };
     }
     if (block.type === "rich-text") {
       return {
@@ -14,9 +17,9 @@ function mapBlocks(
         data: {
           ...block.data,
           markdown: block.data.markdown.replace(
-            /(\]\()(assets\/[^)\s]+)(\))/g,
-            (_match, open: string, url: string, close: string) =>
-              `${open}${transform(url)}${close}`,
+            /(\]\()((?:assets\/|\/api\/sessions\/[^/\s)]+\/assets\/)[^)\s]+)((?:\s+(?:"[^"]*"|'[^']*'|\([^)]*\)))?\))/g,
+            (_match, open: string, url: string, suffix: string) =>
+              `${open}${transform(url)}${suffix}`,
           ),
         },
       };
@@ -37,6 +40,7 @@ function mapBlocks(
       return {
         ...block,
         data: {
+          ...block.data,
           columns: block.data.columns.map((column) => ({
             ...column,
             blocks: mapBlocks(column.blocks, transform),

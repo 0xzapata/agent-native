@@ -67,17 +67,28 @@ type SaveState = "idle" | "dirty" | "saving" | "saved" | "error";
 type Conflict = {
   message: string;
   file: PlanFilename;
-  revision: string;
+  revision: string | null;
 };
 
-function conflictRevision(error: LocalApiError): string {
-  if (!error.payload || typeof error.payload !== "object") return "";
+function conflictDetails(
+  error: LocalApiError,
+  names: PlanFilename[],
+): Pick<Conflict, "file" | "revision"> | null {
+  if (!error.payload || typeof error.payload !== "object") return null;
   const payload = error.payload as Record<string, unknown>;
+  const revisions =
+    payload.revisions && typeof payload.revisions === "object"
+      ? (payload.revisions as Record<string, unknown>)
+      : {};
+  const file = names.find((name) => typeof revisions[name] === "string");
+  if (file) return { file, revision: (revisions[file] as string) || null };
   const current =
     payload.current && typeof payload.current === "object"
       ? (payload.current as Record<string, unknown>)
       : {};
-  return typeof current.revision === "string" ? current.revision : "";
+  return names.length === 1 && typeof current.revision === "string"
+    ? { file: names[0], revision: current.revision || null }
+    : null;
 }
 
 function statusLabel(state: SaveState) {
@@ -423,6 +434,7 @@ export function LocalPlanEditor({ sessionId }: { sessionId: string }) {
   const saveTimer = useRef<number | null>(null);
   const savePromise = useRef<Promise<void> | null>(null);
   const pendingSave = useRef(false);
+  const forcePendingSave = useRef(false);
   const contentRef = useRef<PlanContent | null>(null);
   const sessionRef = useRef<LocalSession | null>(null);
 
@@ -452,86 +464,91 @@ export function LocalPlanEditor({ sessionId }: { sessionId: string }) {
 
   useEffect(() => void refresh(), [refresh]);
 
-  const persist = useCallback(async () => {
-    if (savePromise.current) {
-      pendingSave.current = true;
-      return savePromise.current;
-    }
-    const current = contentRef.current;
-    const activeSession = sessionRef.current;
-    if (!current || !activeSession || conflict) return;
-    const savingContent = current;
-    setSaveState("saving");
-    const operation = (async () => {
-      try {
-        const serialized = await serializeLocalPlan({
-          data: {
-            sessionId,
-            content: savingContent,
-            files: activeSession.files,
-          },
-        });
-        const names = Object.keys(serialized).filter(
-          (name): name is PlanFilename =>
-            serialized[name as PlanFilename] !== undefined,
-        );
-        for (const name of ["canvas.mdx", "prototype.mdx"] as const) {
-          if (
-            activeSession.files[name] !== undefined &&
-            serialized[name] === undefined
-          ) {
-            throw new Error(
-              `${name} cannot be removed through the local editor yet. Reload to keep the source file intact.`,
-            );
-          }
-        }
-        let revisions = { ...activeSession.revisions };
-        try {
-          const saved = await saveFiles(
-            sessionId,
-            Object.fromEntries(
-              names.map((name) => [
-                name,
-                {
-                  content: serialized[name] as string,
-                  revision: revisions[name] ?? null,
-                },
-              ]),
-            ),
-          );
-          revisions = { ...revisions, ...saved };
-        } catch (cause) {
-          if (cause instanceof LocalApiError && cause.status === 409) {
-            const file =
-              names.find((name) => conflictRevision(cause)) ?? names[0];
-            setConflict({
-              message: cause.message,
-              file,
-              revision: conflictRevision(cause),
-            });
-          }
-          throw cause;
-        }
-        const nextSession = { ...activeSession, revisions };
-        setSession(nextSession);
-        sessionRef.current = nextSession;
-        setSaveState(contentRef.current === savingContent ? "saved" : "dirty");
-      } catch (cause) {
-        setSaveState("error");
-        toast.error(
-          cause instanceof Error ? cause.message : "Could not save this plan.",
-        );
-      } finally {
-        savePromise.current = null;
-        if (pendingSave.current) {
-          pendingSave.current = false;
-          void persist();
-        }
+  const persist = useCallback(
+    async (ignoreConflict = false) => {
+      if (savePromise.current) {
+        pendingSave.current = true;
+        forcePendingSave.current ||= ignoreConflict;
+        return savePromise.current;
       }
-    })();
-    savePromise.current = operation;
-    return operation;
-  }, [conflict, sessionId]);
+      const current = contentRef.current;
+      const activeSession = sessionRef.current;
+      if (!current || !activeSession || (conflict && !ignoreConflict)) return;
+      const savingContent = current;
+      setSaveState("saving");
+      const operation = (async () => {
+        try {
+          const serialized = await serializeLocalPlan({
+            data: {
+              sessionId,
+              content: savingContent,
+              files: activeSession.files,
+            },
+          });
+          const names = Object.keys(serialized).filter(
+            (name): name is PlanFilename =>
+              serialized[name as PlanFilename] !== undefined,
+          );
+          for (const name of ["canvas.mdx", "prototype.mdx"] as const) {
+            if (
+              activeSession.files[name] !== undefined &&
+              serialized[name] === undefined
+            ) {
+              throw new Error(
+                `${name} cannot be removed through the local editor yet. Reload to keep the source file intact.`,
+              );
+            }
+          }
+          let revisions = { ...activeSession.revisions };
+          try {
+            const saved = await saveFiles(
+              sessionId,
+              Object.fromEntries(
+                names.map((name) => [
+                  name,
+                  {
+                    content: serialized[name] as string,
+                    revision: revisions[name] ?? null,
+                  },
+                ]),
+              ),
+            );
+            revisions = { ...revisions, ...saved };
+          } catch (cause) {
+            if (cause instanceof LocalApiError && cause.status === 409) {
+              const details = conflictDetails(cause, names);
+              if (details) setConflict({ message: cause.message, ...details });
+            }
+            throw cause;
+          }
+          const nextSession = { ...activeSession, revisions };
+          setSession(nextSession);
+          sessionRef.current = nextSession;
+          setSaveState(
+            contentRef.current === savingContent ? "saved" : "dirty",
+          );
+        } catch (cause) {
+          setSaveState("error");
+          toast.error(
+            cause instanceof Error
+              ? cause.message
+              : "Could not save this plan.",
+          );
+        } finally {
+          savePromise.current = null;
+          if (pendingSave.current) {
+            pendingSave.current = false;
+            const force = forcePendingSave.current;
+            forcePendingSave.current = false;
+            void persist(force);
+          }
+        }
+      })();
+      savePromise.current = operation;
+      return operation;
+    },
+    [conflict, sessionId],
+  );
 
   const scheduleSave = useCallback(
     (next: PlanContent) => {
@@ -593,7 +610,6 @@ export function LocalPlanEditor({ sessionId }: { sessionId: string }) {
       toast.error(
         cause instanceof Error ? cause.message : "Could not save comment.",
       );
-      throw cause;
     } finally {
       setCommentsMutating(false);
     }
@@ -614,7 +630,6 @@ export function LocalPlanEditor({ sessionId }: { sessionId: string }) {
       toast.error(
         cause instanceof Error ? cause.message : "Could not update comments.",
       );
-      throw cause;
     } finally {
       setCommentsMutating(false);
     }
@@ -639,7 +654,6 @@ export function LocalPlanEditor({ sessionId }: { sessionId: string }) {
       toast.error(
         cause instanceof Error ? cause.message : "Could not send to agent.",
       );
-      throw cause;
     } finally {
       setSendingToAgent(false);
     }
@@ -660,7 +674,6 @@ export function LocalPlanEditor({ sessionId }: { sessionId: string }) {
       toast.error(
         cause instanceof Error ? cause.message : "Could not publish plan.",
       );
-      throw cause;
     } finally {
       setPublishing(false);
     }
@@ -669,12 +682,12 @@ export function LocalPlanEditor({ sessionId }: { sessionId: string }) {
   const acceptConflictRevision = () => {
     const active = sessionRef.current;
     if (!active || !conflict) return;
+    const revisions = { ...active.revisions };
+    if (conflict.revision === null) delete revisions[conflict.file];
+    else revisions[conflict.file] = conflict.revision;
     const next = {
       ...active,
-      revisions: {
-        ...active.revisions,
-        [conflict.file]: conflict.revision,
-      },
+      revisions,
     };
     setSession(next);
     sessionRef.current = next;
@@ -684,15 +697,23 @@ export function LocalPlanEditor({ sessionId }: { sessionId: string }) {
     toast.warning(
       `${conflictFile} disk revision accepted. Saving your version.`,
     );
-    window.setTimeout(() => void persist(), 0);
+    window.setTimeout(() => void persist(true), 0);
   };
 
   const copyUnsaved = async () => {
     if (!contentRef.current) return;
-    await navigator.clipboard.writeText(
-      JSON.stringify(contentRef.current, null, 2),
-    );
-    toast.success("Unsaved plan JSON copied");
+    try {
+      await navigator.clipboard.writeText(
+        JSON.stringify(contentRef.current, null, 2),
+      );
+      toast.success("Unsaved plan JSON copied");
+    } catch (cause) {
+      toast.error(
+        cause instanceof Error
+          ? cause.message
+          : "Could not copy unsaved plan JSON.",
+      );
+    }
   };
 
   const title = content?.title || session?.bundle.plan.title || "Local plan";

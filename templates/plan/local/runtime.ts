@@ -64,6 +64,10 @@ export async function readMetadata(): Promise<RuntimeMetadata | null> {
       typeof parsed?.pid !== "number" ||
       typeof parsed?.token !== "string" ||
       typeof parsed?.buildHash !== "string" ||
+      typeof parsed?.startedAt !== "string" ||
+      !Number.isFinite(Date.parse(parsed.startedAt)) ||
+      typeof parsed?.logFile !== "string" ||
+      !path.isAbsolute(parsed.logFile) ||
       parsed?.host !== HOST ||
       parsed?.port !== PORT
     ) {

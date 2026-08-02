@@ -51,9 +51,12 @@ export function localCommentReplies(
   parentId: string,
 ): PlanComment[] {
   const replies: PlanComment[] = [];
+  const seen = new Set([parentId]);
   const appendChildren = (id: string) => {
     for (const comment of comments) {
       if (comment.parentCommentId !== id) continue;
+      if (seen.has(comment.id)) continue;
+      seen.add(comment.id);
       replies.push(comment);
       appendChildren(comment.id);
     }

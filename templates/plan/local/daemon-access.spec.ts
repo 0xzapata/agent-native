@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import { isTailnetViewerRequest } from "./daemon.js";
+import { HOST, PORT } from "./runtime.js";
 
 const request = (method: string, host: string) =>
   ({ method, headers: { host } }) as Parameters<
@@ -30,6 +31,29 @@ describe("tailnet viewer access", () => {
     ).toBe(false);
   });
 
+  it("rejects adding a comment on a longer path", () => {
+    expect(
+      isTailnetViewerRequest(request("POST", "mac.example.ts.net:8443"), [
+        "api",
+        "sessions",
+        "session",
+        "comments",
+        "extra",
+      ]),
+    ).toBe(true);
+  });
+
+  it("rejects a missing host as a remote mutation", () => {
+    expect(
+      isTailnetViewerRequest(
+        { method: "POST", headers: {} } as Parameters<
+          typeof isTailnetViewerRequest
+        >[0],
+        ["api", "sessions", "session", "agent", "send"],
+      ),
+    ).toBe(true);
+  });
+
   it.each([
     ["PUT", ["api", "sessions", "session", "files"]],
     ["PUT", ["api", "sessions", "session", "comments"]],
@@ -47,7 +71,7 @@ describe("tailnet viewer access", () => {
 
   it("does not restrict loopback callers", () => {
     expect(
-      isTailnetViewerRequest(request("POST", "127.0.0.1:8105"), [
+      isTailnetViewerRequest(request("POST", `${HOST}:${PORT}`), [
         "api",
         "sessions",
         "session",

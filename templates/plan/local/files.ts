@@ -213,8 +213,10 @@ export async function readPlan(
     if (snapshot) files[file] = snapshot;
   }
   const content = await parsePlanMdxFolder(await mdxFolder(root));
+  const planFile = files["plan.mdx"];
+  if (!planFile) throw new Error("plan.mdx is required.");
   const harness = parsePlanHarness(
-    parseSimpleFrontmatter(files["plan.mdx"]!.content).data.harness,
+    parseSimpleFrontmatter(planFile.content).data.harness,
   );
   const { comments } = await readComments(root);
   const timestamp = new Date().toISOString();
@@ -265,9 +267,10 @@ async function mdxFolder(
 }
 
 export async function validatePlanRoot(root: string): Promise<void> {
-  await parsePlanMdxFolder(await mdxFolder(root));
-  const plan = await readOptionalFile(root, "plan.mdx");
-  const declaredHarness = parseSimpleFrontmatter(plan!.content).data.harness;
+  const folder = await mdxFolder(root);
+  await parsePlanMdxFolder(folder);
+  const declaredHarness = parseSimpleFrontmatter(folder["plan.mdx"]).data
+    .harness;
   if (declaredHarness !== undefined && !parsePlanHarness(declaredHarness)) {
     throw new Error("harness must be codex, claude-code, or opencode.");
   }
@@ -358,7 +361,6 @@ export async function saveFiles(
     Record<SourceFile, { content: string; revision: string | null }>
   >,
 ): Promise<Partial<Record<SourceFile, FileSnapshot>>> {
-  const originals = new Map<SourceFile, FileSnapshot | undefined>();
   const proposed = await mdxFolder(root);
   for (const file of SOURCE_FILES) {
     const change = changes[file];
@@ -369,26 +371,16 @@ export async function saveFiles(
         current ?? { content: "", revision: "" },
         file,
       );
-    originals.set(file, current);
     proposed[file] = change.content;
   }
   await parsePlanMdxFolder(proposed);
   const saved: Partial<Record<SourceFile, FileSnapshot>> = {};
-  try {
-    for (const file of SOURCE_FILES) {
-      const change = changes[file];
-      if (!change) continue;
-      saved[file] = await saveFile(root, file, change.content, change.revision);
-    }
-    return saved;
-  } catch (error) {
-    for (const [file, original] of originals) {
-      const target = path.join(root, file);
-      if (original) await atomicWrite(target, original.content);
-      else await fs.rm(target, { force: true });
-    }
-    throw error;
+  for (const file of SOURCE_FILES) {
+    const change = changes[file];
+    if (!change) continue;
+    saved[file] = await saveFile(root, file, change.content, change.revision);
   }
+  return saved;
 }
 
 export async function readComments(

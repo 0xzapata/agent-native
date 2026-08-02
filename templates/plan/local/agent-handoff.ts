@@ -73,30 +73,30 @@ export const startOpenCode = async (
     `agent-native-opencode-${randomUUID()}.log`,
   );
   const output = await fs.open(outputPath, "w", 0o600);
-  const child = (() => {
-    try {
-      return launch(
-        "opencode",
-        [
-          "run",
-          "--auto",
-          "--format",
-          "json",
-          "--title",
-          "Local visual plan feedback",
-          "--dir",
-          root,
-          prompt,
-        ],
-        { cwd: root, detached: true, stdio: ["ignore", output.fd, output.fd] },
-      );
-    } finally {
-      void output.close();
-    }
-  })();
-  child.unref();
+  let child: ReturnType<typeof spawn>;
+  try {
+    child = launch(
+      "opencode",
+      [
+        "run",
+        "--auto",
+        "--format",
+        "json",
+        "--title",
+        "Local visual plan feedback",
+        "--dir",
+        root,
+        prompt,
+      ],
+      { cwd: root, detached: true, stdio: ["ignore", output.fd, output.fd] },
+    );
+  } catch (error) {
+    await output.close().catch(() => undefined);
+    await fs.rm(outputPath, { force: true });
+    throw error;
+  }
 
-  return new Promise((resolve, reject) => {
+  const started = new Promise<string>((resolve, reject) => {
     const startedAt = Date.now();
     let settled = false;
     let pollTimer: NodeJS.Timeout | undefined;
@@ -145,6 +145,9 @@ export const startOpenCode = async (
     child.once("error", onError);
     void poll();
   });
+  child.unref();
+  await output.close().catch(() => undefined);
+  return started;
 };
 
 export async function sendToAgentHarness(

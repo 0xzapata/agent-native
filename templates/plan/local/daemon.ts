@@ -127,7 +127,7 @@ function assertLoopbackHost(request: IncomingMessage): void {
   if (
     host !== `${HOST}:${PORT}` &&
     host !== `localhost:${PORT}` &&
-    !/^[a-z0-9-]+\.[a-z0-9-]+\.ts\.net(?::\d+)?$/.test(host ?? "")
+    !/^[a-z0-9-]+\.[a-z0-9-]+\.ts\.net:8443$/.test(host ?? "")
   ) {
     throw new Error("Invalid Host header.");
   }
@@ -157,11 +157,12 @@ export function isTailnetViewerRequest(
 function defaultComment(
   planId: string,
   input: Record<string, unknown>,
+  remote: boolean,
 ): PlanComment {
   const now = new Date().toISOString();
   return {
     id:
-      typeof input.id === "string" && input.id
+      !remote && typeof input.id === "string" && input.id
         ? input.id
         : `cmt_${randomUUID().replaceAll("-", "")}`,
     planId,
@@ -172,7 +173,7 @@ function defaultComment(
     status: "open",
     anchor: typeof input.anchor === "string" ? input.anchor : null,
     message: typeof input.message === "string" ? input.message : "",
-    createdBy: input.createdBy === "agent" ? "agent" : "human",
+    createdBy: !remote && input.createdBy === "agent" ? "agent" : "human",
     authorEmail: null,
     authorName: typeof input.authorName === "string" ? input.authorName : null,
     resolutionTarget: input.resolutionTarget === "human" ? "human" : "agent",
@@ -189,7 +190,11 @@ function defaultComment(
 }
 
 function staticRoots(): string[] {
-  return [path.join(appDir, ".output", "public"), path.join(appDir, "dist")];
+  return [
+    path.join(appDir, ".output", "public"),
+    path.join(appDir, "dist", "client"),
+    path.join(appDir, "dist"),
+  ];
 }
 
 async function existingStaticRoot(): Promise<string | null> {
@@ -238,10 +243,13 @@ async function serveTanstack(
       body: requestBody,
     }),
   );
-  response.writeHead(
-    webResponse.status,
-    Object.fromEntries(webResponse.headers.entries()),
-  );
+  const headers: http.OutgoingHttpHeaders = {};
+  for (const [name, value] of webResponse.headers.entries()) {
+    headers[name] = value;
+  }
+  const cookies = webResponse.headers.getSetCookie?.();
+  if (cookies?.length) headers["set-cookie"] = cookies;
+  response.writeHead(webResponse.status, headers);
   response.end(Buffer.from(await webResponse.arrayBuffer()));
 }
 
@@ -388,6 +396,8 @@ export async function startDaemon(options: {
           return errorJson(response, 401, "Unauthorized.");
         json(response, 200, { ok: true });
         server.close(() => process.exit(0));
+        server.closeIdleConnections();
+        setTimeout(() => process.exit(0), 2_000).unref();
         return;
       }
       if (segments[0] === "api" && segments[1] === "sessions" && segments[2]) {
@@ -422,6 +432,7 @@ export async function startDaemon(options: {
         if (
           segments[3] === "files" &&
           segments[4] &&
+          segments.length === 5 &&
           request.method === "PUT"
         ) {
           const file = segments[4] as PlanFile;
@@ -446,11 +457,19 @@ export async function startDaemon(options: {
           );
           return;
         }
-        if (segments[3] === "comments" && request.method === "GET") {
+        if (
+          segments[3] === "comments" &&
+          segments.length === 4 &&
+          request.method === "GET"
+        ) {
           json(response, 200, await readComments(root));
           return;
         }
-        if (segments[3] === "comments" && request.method === "PUT") {
+        if (
+          segments[3] === "comments" &&
+          segments.length === 4 &&
+          request.method === "PUT"
+        ) {
           const input = (await body(request)) as {
             comments?: unknown;
             revision?: unknown;
@@ -476,10 +495,14 @@ export async function startDaemon(options: {
           );
           return;
         }
-        if (segments[3] === "comments" && request.method === "POST") {
+        if (
+          segments[3] === "comments" &&
+          segments.length === 4 &&
+          request.method === "POST"
+        ) {
           const input = (await body(request)) as Record<string, unknown>;
           const current = await readComments(root);
-          const comment = defaultComment(id, input);
+          const comment = defaultComment(id, input, !isLoopbackHost(request));
           if (!comment.message.trim())
             return errorJson(response, 400, "message is required.");
           const saved = await saveComments(
@@ -515,6 +538,13 @@ export async function startDaemon(options: {
           segments.length === 5 &&
           request.method === "POST"
         ) {
+          if (!isLoopbackHost(request)) {
+            return errorJson(
+              response,
+              403,
+              "Plans can only be sent to an agent from the local editor.",
+            );
+          }
           const snapshot = await readPlan(root, id);
           const openComments = snapshot.comments.filter(
             (comment) => comment.status === "open" && !comment.deletedAt,
@@ -577,19 +607,20 @@ export async function startDaemon(options: {
         });
       } else if ((error as NodeJS.ErrnoException).code === "ENOENT") {
         errorJson(response, 404, "Not found.");
-      } else {
+      } else if (isLoopbackHost(request)) {
         errorJson(response, 400, error);
+      } else {
+        errorJson(response, 400, "Request failed.");
       }
     }
   });
 
-  server.on("error", async (error) => {
-    await fs.appendFile(
-      logPath(),
-      `${new Date().toISOString()} ${String(error)}\n`,
-      { mode: 0o600 },
-    );
-    throw error;
+  server.on("error", (error) => {
+    void fs
+      .appendFile(logPath(), `${new Date().toISOString()} ${String(error)}\n`, {
+        mode: 0o600,
+      })
+      .finally(() => process.exit(1));
   });
   server.listen(PORT, HOST, async () => {
     await writePrivateJson(metadataPath(), {

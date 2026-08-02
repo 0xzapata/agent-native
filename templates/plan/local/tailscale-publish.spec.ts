@@ -40,7 +40,7 @@ describe("local Tailscale publishing", () => {
       `--https=${TAILSCALE_HTTPS_PORT}`,
       "http://127.0.0.1:8105",
     ]);
-    expect(run.mock.calls.flat()).not.toContain("funnel");
+    expect(run.mock.calls.flat(2)).not.toContain("funnel");
   });
 
   it("reuses its existing Serve listener without changing node config", async () => {

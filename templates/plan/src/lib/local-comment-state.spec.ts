@@ -88,4 +88,11 @@ describe("local comment state", () => {
       other,
     ]);
   });
+
+  it("stops traversing cyclic reply chains", () => {
+    const first = comment("first", "second");
+    const second = comment("second", "first");
+
+    expect(localCommentReplies([first, second], first.id)).toEqual([second]);
+  });
 });
