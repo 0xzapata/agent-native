@@ -1,9 +1,10 @@
 {
   "version": 1,
-  "planId": "plan_local_complete_sample",
-  "markdownBlockIds": ["overview"],
   "canvas": {
     "zoom": 0.72,
-    "pan": { "x": 96, "y": 64 }
+    "pan": {
+      "x": 96,
+      "y": 64
+    }
   }
 }

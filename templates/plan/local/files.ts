@@ -2,12 +2,17 @@ import { createHash, randomUUID } from "node:crypto";
 import fs from "node:fs/promises";
 import path from "node:path";
 
-import { parsePlanMdxFolder, type PlanMdxFolder } from "../server/plan-mdx.js";
+import {
+  parsePlanMdxFolder,
+  parseSimpleFrontmatter,
+  type PlanMdxFolder,
+} from "../server/plan-mdx.js";
 import {
   PLAN_ASSET_MAX_SINGLE_BYTES,
   PLAN_ASSET_MAX_TOTAL_BYTES,
   mimeTypeFromFilename,
 } from "../shared/plan-assets.js";
+import { parsePlanHarness, type PlanHarness } from "../shared/plan-harness.js";
 import type { PlanComment } from "../shared/types.js";
 
 export const SOURCE_FILES = [
@@ -27,6 +32,7 @@ export interface FileSnapshot {
 }
 
 export interface PlanSnapshot {
+  metadata: { harness?: PlanHarness };
   files: Partial<Record<PlanFile, FileSnapshot>>;
   bundle: {
     plan: {
@@ -207,9 +213,13 @@ export async function readPlan(
     if (snapshot) files[file] = snapshot;
   }
   const content = await parsePlanMdxFolder(await mdxFolder(root));
+  const harness = parsePlanHarness(
+    parseSimpleFrontmatter(files["plan.mdx"]!.content).data.harness,
+  );
   const { comments } = await readComments(root);
   const timestamp = new Date().toISOString();
   return {
+    metadata: { harness },
     files,
     bundle: {
       plan: {
@@ -256,6 +266,11 @@ async function mdxFolder(
 
 export async function validatePlanRoot(root: string): Promise<void> {
   await parsePlanMdxFolder(await mdxFolder(root));
+  const plan = await readOptionalFile(root, "plan.mdx");
+  const declaredHarness = parseSimpleFrontmatter(plan!.content).data.harness;
+  if (declaredHarness !== undefined && !parsePlanHarness(declaredHarness)) {
+    throw new Error("harness must be codex, claude-code, or opencode.");
+  }
   await listAssets(root, "validation");
   const state = await readOptionalFile(root, ".plan-state.json");
   if (state) JSON.parse(state.content);
@@ -339,7 +354,9 @@ export async function saveFile(
 
 export async function saveFiles(
   root: string,
-  changes: Partial<Record<SourceFile, { content: string; revision: string | null }>>,
+  changes: Partial<
+    Record<SourceFile, { content: string; revision: string | null }>
+  >,
 ): Promise<Partial<Record<SourceFile, FileSnapshot>>> {
   const originals = new Map<SourceFile, FileSnapshot | undefined>();
   const proposed = await mdxFolder(root);
@@ -348,7 +365,10 @@ export async function saveFiles(
     if (!change) continue;
     const current = await readOptionalFile(root, file);
     if ((current?.revision ?? null) !== change.revision)
-      throw new RevisionConflictError(current ?? { content: "", revision: "" }, file);
+      throw new RevisionConflictError(
+        current ?? { content: "", revision: "" },
+        file,
+      );
     originals.set(file, current);
     proposed[file] = change.content;
   }

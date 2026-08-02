@@ -3,7 +3,9 @@ import {
   type PlanContent,
   type PlanContentPatch,
 } from "@shared/plan-content";
+import { parsePlanHarness, type PlanHarness } from "@shared/plan-harness";
 import type { PlanBundle, PlanComment } from "@shared/types";
+
 import { resolveLocalAssetPaths } from "./asset-paths";
 
 export const PLAN_FILES = [
@@ -23,6 +25,7 @@ export type LocalSession = {
   files: Partial<Record<PlanFilename, string>>;
   revisions: RevisionMap;
   comments: PlanComment[];
+  metadata: { harness?: PlanHarness };
 };
 
 export class LocalApiError extends Error {
@@ -137,6 +140,7 @@ export function decodeSession(id: string, value: unknown): LocalSession {
     files,
     revisions: revisionMap(payload.revisions, payload.files),
     comments,
+    metadata: { harness: parsePlanHarness(record(payload.metadata).harness) },
   };
 }
 
@@ -147,7 +151,9 @@ export async function loadSession(id: string): Promise<LocalSession> {
 
 export async function saveFiles(
   sessionId: string,
-  files: Partial<Record<PlanFilename, { content: string; revision: string | null }>>,
+  files: Partial<
+    Record<PlanFilename, { content: string; revision: string | null }>
+  >,
 ): Promise<RevisionMap> {
   const payload = record(
     await request(`/api/sessions/${encodeURIComponent(sessionId)}/files`, {
@@ -161,16 +167,92 @@ export async function saveFiles(
 export async function addComment(
   sessionId: string,
   message: string,
-): Promise<PlanComment> {
+  parentCommentId?: string,
+): Promise<{
+  comment: PlanComment;
+  comments: PlanComment[];
+  revision: string;
+}> {
   const payload = await request(
     `/api/sessions/${encodeURIComponent(sessionId)}/comments`,
-    { method: "POST", body: JSON.stringify({ message }) },
+    {
+      method: "POST",
+      body: JSON.stringify({
+        message,
+        parentCommentId: parentCommentId ?? null,
+      }),
+    },
   );
   const value = record(payload);
-  if (value.comment && typeof value.comment === "object") {
-    return value.comment as PlanComment;
+  if (
+    value.comment &&
+    typeof value.comment === "object" &&
+    Array.isArray(value.comments) &&
+    typeof value.revision === "string"
+  ) {
+    return {
+      comment: value.comment as PlanComment,
+      comments: value.comments as PlanComment[],
+      revision: value.revision,
+    };
   }
-  throw new Error("Comment response omitted the saved comment.");
+  throw new Error("Comment response omitted the saved comment state.");
+}
+
+export async function saveComments(
+  sessionId: string,
+  comments: PlanComment[],
+  revision: string | null,
+): Promise<{ comments: PlanComment[]; revision: string }> {
+  const payload = record(
+    await request(`/api/sessions/${encodeURIComponent(sessionId)}/comments`, {
+      method: "PUT",
+      body: JSON.stringify({ comments, revision }),
+    }),
+  );
+  if (
+    !Array.isArray(payload.comments) ||
+    typeof payload.revision !== "string"
+  ) {
+    throw new Error("Comment response omitted the saved comment state.");
+  }
+  return {
+    comments: payload.comments as PlanComment[],
+    revision: payload.revision,
+  };
+}
+
+export async function sendPlanToAgent(
+  sessionId: string,
+): Promise<{ harness: PlanHarness; threadId: string; url?: string }> {
+  const payload = record(
+    await request(`/api/sessions/${encodeURIComponent(sessionId)}/agent/send`, {
+      method: "POST",
+    }),
+  );
+  const harness = parsePlanHarness(payload.harness);
+  if (!harness || typeof payload.threadId !== "string") {
+    throw new Error("Agent response omitted the task metadata.");
+  }
+  return {
+    harness,
+    threadId: payload.threadId,
+    url: typeof payload.url === "string" ? payload.url : undefined,
+  };
+}
+
+export async function publishPlanToTailnet(
+  sessionId: string,
+): Promise<{ url: string }> {
+  const payload = record(
+    await request(`/api/sessions/${encodeURIComponent(sessionId)}/publish`, {
+      method: "POST",
+    }),
+  );
+  if (typeof payload.url !== "string") {
+    throw new Error("Publish response omitted the tailnet URL.");
+  }
+  return { url: payload.url };
 }
 
 export function applyContentPatch(

@@ -19,6 +19,7 @@ import {
 const PLAN = `---
 title: "Local runtime test"
 version: 2
+harness: "claude-code"
 ---
 
 Local plan body.
@@ -42,10 +43,21 @@ describe("local editor filesystem service", () => {
     ).resolves.toBeUndefined();
   });
 
+  it("rejects unsupported harness metadata", async () => {
+    await fs.writeFile(
+      path.join(root, "plan.mdx"),
+      PLAN.replace('harness: "claude-code"', 'harness: "cursor"'),
+    );
+    await expect(validatePlanRoot(root)).rejects.toThrow(
+      /harness must be codex, claude-code, or opencode/,
+    );
+  });
+
   it("returns parsed content and source revisions for the editor", async () => {
     const snapshot = await readPlan(root, "opaque-session");
     expect(snapshot.files["plan.mdx"]?.revision).toBe(revision(PLAN));
     expect(snapshot.bundle.plan.content.title).toBe("Local runtime test");
+    expect(snapshot.metadata).toEqual({ harness: "claude-code" });
     expect(snapshot.comments).toEqual([]);
   });
 
@@ -99,7 +111,10 @@ describe("local editor filesystem service", () => {
   it("rejects oversized assets", async () => {
     const assets = path.join(root, "assets");
     await fs.mkdir(assets);
-    await fs.writeFile(path.join(assets, "large.png"), Buffer.alloc(2 * 1024 * 1024 + 1));
+    await fs.writeFile(
+      path.join(assets, "large.png"),
+      Buffer.alloc(2 * 1024 * 1024 + 1),
+    );
     await expect(validatePlanRoot(root)).rejects.toThrow(/exceeds/);
   });
 
@@ -127,7 +142,8 @@ describe("local editor filesystem service", () => {
   });
 
   it("preflights bundle revisions before changing any source file", async () => {
-    const canvas = '<DesignBoard title="A"><Artboard id="a" label="A" x={0} y={0} /></DesignBoard>\n';
+    const canvas =
+      '<DesignBoard title="A"><Artboard id="a" label="A" x={0} y={0} /></DesignBoard>\n';
     await fs.writeFile(path.join(root, "canvas.mdx"), canvas);
     const external = canvas.replace('title="A"', 'title="External"');
     await fs.writeFile(path.join(root, "canvas.mdx"), external);
@@ -139,7 +155,9 @@ describe("local editor filesystem service", () => {
       }),
     ).rejects.toBeInstanceOf(RevisionConflictError);
     expect(await fs.readFile(path.join(root, "plan.mdx"), "utf8")).toBe(PLAN);
-    expect(await fs.readFile(path.join(root, "canvas.mdx"), "utf8")).toBe(external);
+    expect(await fs.readFile(path.join(root, "canvas.mdx"), "utf8")).toBe(
+      external,
+    );
   });
 
   it("round-trips comments with revisions", async () => {

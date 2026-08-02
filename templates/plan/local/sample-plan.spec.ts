@@ -23,6 +23,7 @@ describe("complete local sample plan", () => {
     await expect(validatePlanRoot(root)).resolves.toBeUndefined();
 
     const snapshot = await readPlan(root, "sample-session");
+    expect(snapshot.metadata).toEqual({ harness: "codex" });
     expect(Object.keys(snapshot.files).sort()).toEqual([
       ".plan-state.json",
       "canvas.mdx",

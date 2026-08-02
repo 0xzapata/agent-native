@@ -10,40 +10,50 @@ const fixture = path.join(
 );
 const baseURL = process.env.PLAN_LOCAL_BASE_URL ?? "http://127.0.0.1:8105";
 const sessionId = process.env.PLAN_LOCAL_SESSION_ID;
+const fixtureFiles = [
+  "plan.mdx",
+  "canvas.mdx",
+  "prototype.mdx",
+  ".plan-state.json",
+  "comments.json",
+] as const;
+
+const originalFiles = await Promise.all(
+  fixtureFiles.map(
+    async (name) =>
+      [name, await fs.readFile(path.join(fixture, name), "utf8")] as const,
+  ),
+);
+
+async function restoreFixture() {
+  await Promise.all(
+    originalFiles.map(([name, content]) =>
+      fs.writeFile(path.join(fixture, name), content, "utf8"),
+    ),
+  );
+}
 
 test.use({ baseURL });
+test.afterEach(restoreFixture);
 
 test("complete local plan exercises edit, canvas, prototype, comments, asset, state, reload, and loopback boundary", async ({
-  page,
+  browser,
 }) => {
   test.skip(
     !sessionId,
     "Set PLAN_LOCAL_SESSION_ID after registering local/sample-plan.",
   );
   if (!sessionId) return;
-  const originalFiles = await Promise.all(
-    [
-      "plan.mdx",
-      "canvas.mdx",
-      "prototype.mdx",
-      ".plan-state.json",
-      "comments.json",
-    ].map(
-      async (name) =>
-        [name, await fs.readFile(path.join(fixture, name), "utf8")] as const,
-    ),
-  );
-  const restoreFixture = async () => {
-    await Promise.all(
-      originalFiles.map(([name, content]) =>
-        fs.writeFile(path.join(fixture, name), content, "utf8"),
-      ),
-    );
-  };
   const nonLoopbackRequests: string[] = [];
+  const context = await browser.newContext({ baseURL });
+  const page = await context.newPage();
   page.on("request", (request) => {
     const url = new URL(request.url());
-    if (url.hostname !== "127.0.0.1" && url.hostname !== "localhost") {
+    if (
+      (url.protocol === "http:" || url.protocol === "https:") &&
+      url.hostname !== "127.0.0.1" &&
+      url.hostname !== "localhost"
+    ) {
       nonLoopbackRequests.push(request.url());
     }
   });
@@ -89,6 +99,8 @@ test("complete local plan exercises edit, canvas, prototype, comments, asset, st
     const titleText = `Local Editor Complete Sample ${unique}`;
     const summaryText = `All local surfaces passed ${unique}.`;
     const commentText = `Local feedback ${unique}`;
+    const replyText = `Local reply ${unique}`;
+    const editedReplyText = `Edited local reply ${unique}`;
 
     const title = page.locator('[aria-label="Plan title"]');
     await title.click();
@@ -107,9 +119,77 @@ test("complete local plan exercises edit, canvas, prototype, comments, asset, st
       .fill(commentText);
     await page.getByRole("button", { name: "Add comment" }).click();
     await expect(page.getByText(commentText)).toBeVisible();
+
+    let sentToAgent = false;
+    await page.route(
+      `**/api/sessions/${sessionId}/agent/send`,
+      async (route) => {
+        sentToAgent = true;
+        await route.fulfill({
+          json: {
+            harness: "codex",
+            threadId: "sample-agent-task",
+            url: "codex://threads/sample-agent-task",
+          },
+        });
+      },
+    );
+    await page.getByRole("button", { name: "Send to agent" }).click();
+    await expect(
+      page.getByText("Sent to codex task sample-agent-task"),
+    ).toBeVisible();
+    expect(sentToAgent).toBe(true);
+
+    const commentThread = page
+      .locator("article")
+      .filter({ hasText: commentText });
+    await commentThread
+      .getByRole("button", { name: "Reply", exact: true })
+      .click();
+    await commentThread.getByRole("textbox", { name: "Reply" }).fill(replyText);
+    await commentThread
+      .getByRole("button", { name: "Reply", exact: true })
+      .last()
+      .click();
+    await expect(commentThread.getByText(replyText)).toBeVisible();
+
+    const replyBlock = commentThread.locator(":scope > div > div").nth(1);
+    await replyBlock.getByTitle("Edit comment").click();
+    await commentThread
+      .getByRole("textbox", { name: "Edit comment" })
+      .fill(editedReplyText);
+    await commentThread
+      .getByRole("button", { name: "Save", exact: true })
+      .click();
+    await expect(commentThread.getByText(editedReplyText)).toBeVisible();
+
+    await commentThread.getByTitle("Resolve comment").click();
+    await expect(
+      commentThread.getByText("Resolved", { exact: true }),
+    ).toBeVisible();
+    await commentThread.getByTitle("Reopen comment").click();
+    await expect(
+      commentThread.getByText("Open", { exact: true }).first(),
+    ).toBeVisible();
+
     await expect(page.getByText("Saved to disk")).toBeVisible({
       timeout: 20_000,
     });
+
+    let published = false;
+    await page.route(`**/api/sessions/${sessionId}/publish`, async (route) => {
+      published = true;
+      await route.fulfill({
+        json: {
+          url: `https://mac.example.ts.net:8443/plans/${sessionId}`,
+        },
+      });
+    });
+    await page.getByRole("button", { name: "Publish to tailnet" }).click();
+    await expect(
+      page.getByText(/Tailnet URL copied|Published to https:/),
+    ).toBeVisible();
+    expect(published).toBe(true);
 
     await page.reload();
     await expect(page.locator('[aria-label="Plan title"]')).toHaveText(
@@ -122,8 +202,25 @@ test("complete local plan exercises edit, canvas, prototype, comments, asset, st
       "Local-first review flow",
     );
     await expect(page.getByText(commentText)).toBeVisible();
+    await expect(page.getByText(editedReplyText)).toBeVisible();
     await expect(page.locator(".plan-canvas-zoom span")).toContainText("72%");
     expect(nonLoopbackRequests).toEqual([]);
+
+    const reloadedThread = page
+      .locator("article")
+      .filter({ hasText: commentText });
+    const reloadedReplyBlock = reloadedThread
+      .locator(":scope > div > div")
+      .nth(1);
+    await reloadedReplyBlock.getByTitle("Delete comment").click();
+    await page.getByRole("button", { name: "Delete", exact: true }).click();
+    await expect(page.getByText(editedReplyText)).toHaveCount(0);
+
+    await reloadedThread.getByTitle("Delete comment").click();
+    await page.getByRole("button", { name: "Delete", exact: true }).click();
+    await expect(page.getByText(commentText)).toHaveCount(0);
+    await page.reload();
+    await expect(page.getByText(commentText)).toHaveCount(0);
 
     expect(await fs.readFile(path.join(fixture, "plan.mdx"), "utf8")).toContain(
       titleText,
@@ -131,8 +228,12 @@ test("complete local plan exercises edit, canvas, prototype, comments, asset, st
     const comments = JSON.parse(
       await fs.readFile(path.join(fixture, "comments.json"), "utf8"),
     ) as Array<{ message: string }>;
-    expect(comments.map(({ message }) => message)).toContain(commentText);
+    expect(comments.map(({ message }) => message)).not.toContain(commentText);
+    expect(comments.map(({ message }) => message)).not.toContain(
+      editedReplyText,
+    );
   } finally {
+    await context.close();
     await restoreFixture();
   }
 });

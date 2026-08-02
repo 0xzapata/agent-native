@@ -36,7 +36,30 @@ truth.
 | `GET /api/sessions/:id` | Read MDX, state, comments, assets, and revisions |
 | `PUT /api/sessions/:id/files/:file` | Atomically save a known file with revision |
 | `GET/POST/PUT /api/sessions/:id/comments` | Read or update local comments |
+| `POST /api/sessions/:id/publish` | Publish the editor through Tailscale Serve on HTTPS 8443 |
 | `GET /api/sessions/:id/assets/*` | Read a validated local asset |
+
+## Agent Harness Metadata
+
+- Record the originating agent in `plan.mdx` frontmatter as optional
+  `harness: "codex" | "claude-code" | "opencode"`.
+- `AGENT_NATIVE_HARNESS` is the explicit override. Otherwise `local open`
+  detects the active Codex, Claude Code, or OpenCode environment and keeps the
+  value in private session metadata without rewriting legacy plans.
+- “Send to agent” routes feedback back to that harness. A plan with no metadata
+  keeps the current Codex fallback for backward compatibility.
+
+## Tailnet Publishing
+
+- “Publish to tailnet” uses `tailscale serve`, never Funnel, and copies a URL
+  available only to peers authorized by the active tailnet ACLs.
+- The dedicated HTTPS port is `8443`. Refuse to overwrite an unrelated Serve
+  listener already using that port.
+- Tailnet peers may view the plan and add comments. File edits, comment edits
+  or deletion, agent dispatch, publish, registration, and shutdown remain
+  unavailable through the tailnet URL.
+- Agents can publish with `pnpm local publish --dir <plan-folder>` and receive
+  the tailnet URL on stdout.
 
 ## Checks
 

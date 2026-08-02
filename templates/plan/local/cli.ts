@@ -7,6 +7,7 @@ import { fileURLToPath } from "node:url";
 import { renderPlanBlockAuthoringExamples } from "../server/plan-block-examples.js";
 import { renderPlanBlockVocabulary } from "../shared/plan-block-registry.js";
 import { canonicalPlanRoot, validatePlanRoot } from "./files.js";
+import { detectPlanHarness } from "./plan-harness.js";
 import {
   ensureRuntimeDir,
   HOST,
@@ -16,9 +17,11 @@ import {
   readMetadata,
   sessionsPath,
 } from "./runtime.js";
+import { publishPlanToTailnet } from "./tailscale-publish.js";
 
 const localDir = path.dirname(fileURLToPath(import.meta.url));
-const appDir = path.dirname(localDir);
+const packagedRuntime = process.env.KARTELSH_VISUAL_PLAN_PACKAGED === "1";
+const appDir = packagedRuntime ? localDir : path.dirname(localDir);
 
 function argument(name: string): string | undefined {
   const index = process.argv.indexOf(name);
@@ -63,6 +66,11 @@ async function dependenciesInstalled(): Promise<boolean> {
 }
 
 async function buildHash(): Promise<string> {
+  if (packagedRuntime) {
+    return createHash("sha256")
+      .update(await fs.readFile(fileURLToPath(import.meta.url)))
+      .digest("hex");
+  }
   const hash = createHash("sha256");
   for (const name of [
     "app",
@@ -120,12 +128,15 @@ function processExists(pid: number): boolean {
 }
 
 async function outputExists(): Promise<boolean> {
-  for (const target of [
+  const targets = [
     path.join(appDir, ".output", "public", "index.html"),
     path.join(appDir, "dist", "client", "index.html"),
     path.join(appDir, "dist", "index.html"),
     path.join(appDir, "dist", "server", "server.js"),
-  ]) {
+  ];
+  if (packagedRuntime)
+    targets.push(path.join(appDir, "dist", "server", "server.mjs"));
+  for (const target of targets) {
     try {
       if ((await fs.stat(target)).isFile()) return true;
     } catch {
@@ -151,6 +162,7 @@ async function ensureBuild(
   expectedHash: string,
   currentHash?: string,
 ): Promise<void> {
+  if (packagedRuntime && (await outputExists())) return;
   if ((await outputExists()) && currentHash === expectedHash) return;
   if (!(await dependenciesInstalled())) {
     await run("pnpm", ["install", "--frozen-lockfile"]);
@@ -188,7 +200,9 @@ async function start(expectedHash: string): Promise<{ token: string }> {
   const log = await fs.open(logPath(), "a", 0o600);
   const child = spawn(
     process.execPath,
-    ["--import", "tsx", path.join(localDir, "daemon.ts")],
+    packagedRuntime
+      ? [path.join(localDir, "daemon.mjs")]
+      : ["--import", "tsx", path.join(localDir, "daemon.ts")],
     {
       cwd: appDir,
       detached: true,
@@ -238,13 +252,39 @@ async function commandOpen(): Promise<void> {
       authorization: `Bearer ${daemon.token}`,
       "content-type": "application/json",
     },
-    body: JSON.stringify({ root }),
+    body: JSON.stringify({ root, harness: detectPlanHarness() }),
   });
   const result = (await response.json()) as { url?: string; error?: string };
   if (!response.ok || !result.url)
     throw new Error(result.error ?? "Could not register plan folder.");
   await openBrowser(result.url);
   process.stdout.write(`${result.url}\n`);
+}
+
+async function commandPublish(): Promise<void> {
+  const root = await canonicalPlanRoot(requiredArgument("--dir"));
+  await validatePlanRoot(root);
+  const expectedHash = await buildHash();
+  const metadata = await readMetadata();
+  await ensureBuild(expectedHash, metadata?.buildHash);
+  const daemon = await start(expectedHash);
+  const response = await fetch(`http://${HOST}:${PORT}/api/register`, {
+    method: "POST",
+    headers: {
+      authorization: `Bearer ${daemon.token}`,
+      "content-type": "application/json",
+    },
+    body: JSON.stringify({ root, harness: detectPlanHarness() }),
+  });
+  const result = (await response.json()) as {
+    sessionId?: string;
+    error?: string;
+  };
+  if (!response.ok || !result.sessionId) {
+    throw new Error(result.error ?? "Could not register plan folder.");
+  }
+  const published = await publishPlanToTailnet(result.sessionId);
+  process.stdout.write(`${published.url}\n`);
 }
 
 async function commandCheck(): Promise<void> {
@@ -302,13 +342,14 @@ async function commandStop(): Promise<void> {
 const command = process.argv[2];
 try {
   if (command === "open") await commandOpen();
+  else if (command === "publish") await commandPublish();
   else if (command === "check") await commandCheck();
   else if (command === "blocks") await commandBlocks();
   else if (command === "status") await commandStatus();
   else if (command === "stop") await commandStop();
   else
     throw new Error(
-      "Usage: pnpm local <open|check|blocks|status|stop> [options]",
+      "Usage: kartelsh-visual-plan <open|publish|check|blocks|status|stop> [options]",
     );
 } catch (error) {
   process.stderr.write(

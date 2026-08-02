@@ -4,7 +4,10 @@ import http, { type IncomingMessage, type ServerResponse } from "node:http";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
+import { parsePlanHarness, type PlanHarness } from "../shared/plan-harness.js";
 import type { PlanComment } from "../shared/types.js";
+import { sendToAgentHarness } from "./agent-handoff.js";
+import { buildAgentPrompt } from "./codex-agent.js";
 import {
   canonicalPlanRoot,
   readAsset,
@@ -26,11 +29,16 @@ import {
   sessionsPath,
   writePrivateJson,
 } from "./runtime.js";
+import { publishPlanToTailnet } from "./tailscale-publish.js";
 
-type SessionMap = Record<string, { root: string; registeredAt: string }>;
+type SessionMap = Record<
+  string,
+  { root: string; registeredAt: string; harness?: PlanHarness }
+>;
 
 const localDir = path.dirname(fileURLToPath(import.meta.url));
-const appDir = path.dirname(localDir);
+const packagedRuntime = process.env.KARTELSH_VISUAL_PLAN_PACKAGED === "1";
+const appDir = packagedRuntime ? localDir : path.dirname(localDir);
 let tanstackFetchPromise: Promise<
   (request: Request) => Promise<Response>
 > | null = null;
@@ -80,7 +88,8 @@ async function rawBody(request: IncomingMessage): Promise<Uint8Array> {
 async function readSessions(): Promise<SessionMap> {
   try {
     const parsed = JSON.parse(await fs.readFile(sessionsPath(), "utf8"));
-    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return {};
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed))
+      return {};
     const sessions: SessionMap = {};
     for (const [id, value] of Object.entries(parsed)) {
       if (!/^[A-Za-z0-9_-]{32,64}$/.test(id)) continue;
@@ -115,9 +124,34 @@ function sessionRoot(sessions: SessionMap, id: string): string {
 
 function assertLoopbackHost(request: IncomingMessage): void {
   const host = request.headers.host?.toLowerCase();
-  if (host !== `${HOST}:${PORT}` && host !== `localhost:${PORT}`) {
+  if (
+    host !== `${HOST}:${PORT}` &&
+    host !== `localhost:${PORT}` &&
+    !/^[a-z0-9-]+\.[a-z0-9-]+\.ts\.net(?::\d+)?$/.test(host ?? "")
+  ) {
     throw new Error("Invalid Host header.");
   }
+}
+
+function isLoopbackHost(request: IncomingMessage): boolean {
+  const host = request.headers.host?.toLowerCase();
+  return host === `${HOST}:${PORT}` || host === `localhost:${PORT}`;
+}
+
+export function isTailnetViewerRequest(
+  request: IncomingMessage,
+  segments: string[],
+): boolean {
+  if (isLoopbackHost(request)) return false;
+  if (request.method === "GET" || request.method === "HEAD") return false;
+  return !(
+    request.method === "POST" &&
+    segments[0] === "api" &&
+    segments[1] === "sessions" &&
+    segments[2] &&
+    segments[3] === "comments" &&
+    segments.length === 4
+  );
 }
 
 function defaultComment(
@@ -173,7 +207,12 @@ async function tanstackFetch(): Promise<
   (request: Request) => Promise<Response>
 > {
   tanstackFetchPromise ??= import(
-    path.join(appDir, "dist", "server", "server.js")
+    path.join(
+      appDir,
+      "dist",
+      "server",
+      packagedRuntime ? "server.mjs" : "server.js",
+    )
   ).then((module) => {
     const handler = (module.default as { fetch?: unknown })?.fetch;
     if (typeof handler !== "function")
@@ -302,6 +341,13 @@ export async function startDaemon(options: {
       .map(decodeURIComponent);
     try {
       assertLoopbackHost(request);
+      if (isTailnetViewerRequest(request, segments)) {
+        return errorJson(
+          response,
+          403,
+          "Tailnet viewers can read plans and add comments only.",
+        );
+      }
       if (request.method === "GET" && url.pathname === "/health") {
         json(response, 200, {
           ok: true,
@@ -313,7 +359,10 @@ export async function startDaemon(options: {
       if (request.method === "POST" && url.pathname === "/api/register") {
         if (!authorize(request, options.token))
           return errorJson(response, 401, "Unauthorized.");
-        const input = (await body(request)) as { root?: unknown };
+        const input = (await body(request)) as {
+          root?: unknown;
+          harness?: unknown;
+        };
         if (typeof input.root !== "string")
           return errorJson(response, 400, "root is required.");
         const root = await canonicalPlanRoot(input.root);
@@ -322,7 +371,11 @@ export async function startDaemon(options: {
           ([, session]) => session.root === root,
         )?.[0];
         const id = existing ?? randomBytes(24).toString("base64url");
-        sessions[id] = { root, registeredAt: new Date().toISOString() };
+        sessions[id] = {
+          root,
+          registeredAt: new Date().toISOString(),
+          harness: parsePlanHarness(input.harness) ?? sessions[id]?.harness,
+        };
         await writeSessions(sessions);
         json(response, 200, {
           sessionId: id,
@@ -341,14 +394,29 @@ export async function startDaemon(options: {
         const id = segments[2];
         const root = await canonicalPlanRoot(sessionRoot(sessions, id));
         if (segments.length === 3 && request.method === "GET") {
-          json(response, 200, await readPlan(root, id));
+          const snapshot = await readPlan(root, id);
+          json(response, 200, {
+            ...snapshot,
+            metadata: {
+              harness: snapshot.metadata.harness ?? sessions[id]?.harness,
+            },
+          });
           return;
         }
-        if (segments[3] === "files" && segments.length === 4 && request.method === "PUT") {
+        if (
+          segments[3] === "files" &&
+          segments.length === 4 &&
+          request.method === "PUT"
+        ) {
           const input = (await body(request)) as { files?: unknown };
           if (!input.files || typeof input.files !== "object")
             return errorJson(response, 400, "files are required.");
-          json(response, 200, { files: await saveFiles(root, input.files as Parameters<typeof saveFiles>[1]) });
+          json(response, 200, {
+            files: await saveFiles(
+              root,
+              input.files as Parameters<typeof saveFiles>[1],
+            ),
+          });
           return;
         }
         if (
@@ -424,6 +492,54 @@ export async function startDaemon(options: {
             comments: saved.comments,
             revision: saved.revision,
           });
+          return;
+        }
+        if (
+          segments[3] === "publish" &&
+          segments.length === 4 &&
+          request.method === "POST"
+        ) {
+          if (!isLoopbackHost(request)) {
+            return errorJson(
+              response,
+              403,
+              "Plans can only be published from the local editor.",
+            );
+          }
+          json(response, 200, await publishPlanToTailnet(id));
+          return;
+        }
+        if (
+          segments[3] === "agent" &&
+          segments[4] === "send" &&
+          segments.length === 5 &&
+          request.method === "POST"
+        ) {
+          const snapshot = await readPlan(root, id);
+          const openComments = snapshot.comments.filter(
+            (comment) => comment.status === "open" && !comment.deletedAt,
+          );
+          if (openComments.length === 0) {
+            return errorJson(
+              response,
+              400,
+              "Add an open comment before sending this plan to an agent.",
+            );
+          }
+          const harness =
+            snapshot.metadata.harness ?? sessions[id]?.harness ?? "codex";
+          json(
+            response,
+            202,
+            await sendToAgentHarness({
+              harness,
+              root,
+              prompt: buildAgentPrompt({
+                title: snapshot.bundle.plan.title,
+                commentCount: openComments.length,
+              }),
+            }),
+          );
           return;
         }
         if (

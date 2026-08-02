@@ -1433,29 +1433,40 @@ const diagramDataSchema: z.ZodType<PlanDiagramBlock["data"]> = z
     });
   });
 
+function normalizePlanImageUrl(value: string): string | null {
+  try {
+    const url = new URL(value);
+    return url.protocol === "http:" || url.protocol === "https:" ? value : null;
+  } catch {
+    // Continue with the two supported local URL shapes.
+  }
+  if (value.startsWith("/_agent-native/plan-asset/")) return value;
+  const segments = value.split("/");
+  const normalized: string[] = [];
+  for (const segment of segments) {
+    if (segment === ".") continue;
+    if (!segment || segment === ".." || segment.includes("\\")) return null;
+    normalized.push(segment);
+  }
+  if (normalized.length === 2 && normalized[0] === "assets") {
+    return normalized.join("/");
+  }
+  return null;
+}
+
 export const imageDataSchema: z.ZodType<PlanImageBlock["data"]> = z
   .object({
     assetId: z.string().trim().min(1).max(200).optional(),
-    // Accepts absolute URLs and relative `assets/<filename>` paths produced by
-    // exportPlanContentToMdxFolder for the MDX round-trip.
+    // Local asset folders are flat. Normalize harmless `.` segments while
+    // rejecting traversal, nested paths, and platform-specific separators.
     url: z
       .string()
       .trim()
       .max(2_000)
-      .refine(
-        (v) =>
-          v.startsWith("assets/") ||
-          v.startsWith("/_agent-native/plan-asset/") ||
-          (() => {
-            try {
-              new URL(v);
-              return true;
-            } catch {
-              return false;
-            }
-          })(),
-        { message: "url must be an absolute URL or a relative assets/ path" },
-      )
+      .refine((value) => normalizePlanImageUrl(value) !== null, {
+        message: "url must be an absolute URL or a relative assets/ path",
+      })
+      .overwrite((value) => normalizePlanImageUrl(value) ?? value)
       .optional(),
     alt: z.string().trim().min(1).max(400),
     caption: z.string().trim().max(400).optional(),

@@ -1,12 +1,18 @@
+import type { PlanContent, PlanContentPatch } from "@shared/plan-content";
+import type { PlanComment } from "@shared/types";
 import {
   IconAlertTriangle,
   IconCheck,
   IconCopy,
+  IconEdit,
   IconMessageCircle,
   IconMoon,
+  IconNetwork,
   IconRefresh,
+  IconRotateClockwise,
   IconSend,
   IconSun,
+  IconTrash,
 } from "@tabler/icons-react";
 import { useTheme } from "next-themes";
 import {
@@ -18,12 +24,18 @@ import {
 } from "react";
 import { toast } from "sonner";
 
-import type {
-  PlanContent,
-  PlanContentPatch,
-} from "@shared/plan-content";
-import type { PlanComment } from "@shared/types";
 import { PlanContentRenderer } from "@/components/plan/PlanContentRenderer";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogTrigger,
+} from "@/components/ui/alert-dialog";
 import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Textarea } from "@/components/ui/textarea";
@@ -34,10 +46,20 @@ import {
   addComment,
   applyContentPatch,
   loadSession,
+  saveComments,
   saveFiles,
+  publishPlanToTailnet,
+  sendPlanToAgent,
   type LocalSession,
   type PlanFilename,
 } from "../lib/local-api";
+import {
+  deleteLocalComment,
+  localCommentReplies,
+  rootLocalComments,
+  updateLocalComment,
+  visibleLocalComments,
+} from "../lib/local-comment-state";
 import { serializeLocalPlan } from "../lib/plan-source";
 
 type SaveState = "idle" | "dirty" | "saving" | "saved" | "error";
@@ -68,55 +90,85 @@ function statusLabel(state: SaveState) {
 
 function CommentRail({
   comments,
-  onSubmit,
+  className,
+  mutating,
+  onAdd,
+  onDelete,
+  onSendToAgent,
+  onUpdate,
+  readOnly,
+  sendingToAgent,
 }: {
   comments: PlanComment[];
-  onSubmit: (message: string) => Promise<void>;
+  className?: string;
+  mutating: boolean;
+  onAdd: (message: string, parentCommentId?: string) => Promise<void>;
+  onDelete: (id: string) => Promise<void>;
+  onSendToAgent: () => Promise<void>;
+  onUpdate: (
+    id: string,
+    patch: Partial<Pick<PlanComment, "message" | "status">>,
+  ) => Promise<void>;
+  sendingToAgent: boolean;
+  readOnly?: boolean;
 }) {
   const [message, setMessage] = useState("");
-  const [sending, setSending] = useState(false);
+  const visibleComments = visibleLocalComments(comments);
   const submit = async (event: FormEvent) => {
     event.preventDefault();
     const next = message.trim();
-    if (!next || sending) return;
-    setSending(true);
-    try {
-      await onSubmit(next);
-      setMessage("");
-    } finally {
-      setSending(false);
-    }
+    if (!next || mutating) return;
+    await onAdd(next);
+    setMessage("");
   };
 
   return (
-    <aside className="flex min-h-0 w-[22rem] shrink-0 flex-col border-l border-border bg-background max-lg:hidden">
+    <aside
+      className={cn(
+        "flex min-h-0 w-[22rem] shrink-0 flex-col border-l border-border bg-background",
+        className,
+      )}
+    >
       <div className="flex h-14 items-center gap-2 border-b border-border px-4">
         <IconMessageCircle className="size-4" />
         <h2 className="text-sm font-medium">Comments</h2>
         <span className="ml-auto text-xs tabular-nums text-muted-foreground">
-          {comments.length}
+          {visibleComments.length}
         </span>
+        {!readOnly && (
+          <Button
+            type="button"
+            size="sm"
+            disabled={
+              sendingToAgent ||
+              !visibleComments.some(({ status }) => status === "open")
+            }
+            onClick={() => void onSendToAgent()}
+          >
+            <IconSend className="size-4" />
+            {sendingToAgent ? "Sending…" : "Send to agent"}
+          </Button>
+        )}
       </div>
       <ScrollArea className="min-h-0 flex-1">
         <div className="space-y-5 p-4">
-          {comments.length === 0 ? (
+          {visibleComments.length === 0 ? (
             <p className="py-8 text-center text-sm leading-6 text-muted-foreground">
               Leave a note for the coding agent. Feedback stays in
               <code className="mx-1">comments.json</code>.
             </p>
           ) : (
-            comments.map((comment) => (
-              <article key={comment.id} className="border-b border-border pb-4 last:border-0">
-                <div className="flex items-center gap-2 text-xs text-muted-foreground">
-                  <span className="font-medium text-foreground">
-                    {comment.authorName || "You"}
-                  </span>
-                  <span>{comment.status === "resolved" ? "Resolved" : "Open"}</span>
-                </div>
-                <p className="mt-2 whitespace-pre-wrap text-sm leading-6">
-                  {comment.message}
-                </p>
-              </article>
+            rootLocalComments(visibleComments).map((comment) => (
+              <CommentThread
+                key={comment.id}
+                comment={comment}
+                replies={localCommentReplies(visibleComments, comment.id)}
+                mutating={mutating}
+                onAdd={onAdd}
+                onDelete={onDelete}
+                onUpdate={onUpdate}
+                readOnly={readOnly}
+              />
             ))
           )}
         </div>
@@ -129,16 +181,233 @@ function CommentRail({
           rows={3}
           className="resize-none"
         />
-        <Button className="mt-2 w-full" size="sm" disabled={!message.trim() || sending}>
+        <Button
+          className="mt-2 w-full"
+          size="sm"
+          disabled={!message.trim() || mutating}
+        >
           <IconSend className="size-4" />
-          {sending ? "Saving…" : "Add comment"}
+          {mutating ? "Saving…" : "Add comment"}
         </Button>
       </form>
     </aside>
   );
 }
 
+function CommentThread({
+  comment,
+  replies,
+  mutating,
+  onAdd,
+  onDelete,
+  onUpdate,
+  readOnly,
+}: {
+  comment: PlanComment;
+  replies: PlanComment[];
+  mutating: boolean;
+  onAdd: (message: string, parentCommentId?: string) => Promise<void>;
+  onDelete: (id: string) => Promise<void>;
+  onUpdate: (
+    id: string,
+    patch: Partial<Pick<PlanComment, "message" | "status">>,
+  ) => Promise<void>;
+  readOnly?: boolean;
+}) {
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [editMessage, setEditMessage] = useState("");
+  const [replying, setReplying] = useState(false);
+  const [reply, setReply] = useState("");
+  const items = [comment, ...replies];
+
+  const startEdit = (item: PlanComment) => {
+    setEditingId(item.id);
+    setEditMessage(item.message);
+  };
+
+  return (
+    <article className="border-b border-border pb-4 last:border-0">
+      <div className="space-y-3">
+        {items.map((item, index) => (
+          <div
+            key={item.id}
+            className={cn(index > 0 && "ml-4 border-l border-border pl-3")}
+          >
+            <div className="flex items-center gap-2 text-xs text-muted-foreground">
+              <span className="font-medium text-foreground">
+                {item.authorName || "You"}
+              </span>
+              <span>{item.status === "resolved" ? "Resolved" : "Open"}</span>
+            </div>
+            {editingId === item.id ? (
+              <form
+                className="mt-2"
+                onSubmit={async (event) => {
+                  event.preventDefault();
+                  const next = editMessage.trim();
+                  if (!next || mutating) return;
+                  await onUpdate(item.id, { message: next });
+                  setEditingId(null);
+                }}
+              >
+                <Textarea
+                  aria-label="Edit comment"
+                  value={editMessage}
+                  onChange={(event) => setEditMessage(event.target.value)}
+                  rows={2}
+                  className="resize-none"
+                />
+                <div className="mt-2 flex gap-2">
+                  <Button size="sm" disabled={!editMessage.trim() || mutating}>
+                    Save
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => setEditingId(null)}
+                  >
+                    Cancel
+                  </Button>
+                </div>
+              </form>
+            ) : (
+              <p className="mt-2 whitespace-pre-wrap text-sm leading-6">
+                {item.message}
+              </p>
+            )}
+            {editingId !== item.id && (
+              <div className="mt-2 flex flex-wrap gap-1">
+                {index === 0 && (
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    disabled={mutating}
+                    onClick={() => setReplying((value) => !value)}
+                  >
+                    Reply
+                  </Button>
+                )}
+                {!readOnly && (
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="icon"
+                    title="Edit comment"
+                    disabled={mutating}
+                    onClick={() => startEdit(item)}
+                  >
+                    <IconEdit className="size-3.5" />
+                  </Button>
+                )}
+                {!readOnly && index === 0 && (
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="icon"
+                    title={
+                      item.status === "resolved"
+                        ? "Reopen comment"
+                        : "Resolve comment"
+                    }
+                    disabled={mutating}
+                    onClick={() =>
+                      void onUpdate(item.id, {
+                        status:
+                          item.status === "resolved" ? "open" : "resolved",
+                      })
+                    }
+                  >
+                    {item.status === "resolved" ? (
+                      <IconRotateClockwise className="size-3.5" />
+                    ) : (
+                      <IconCheck className="size-3.5" />
+                    )}
+                  </Button>
+                )}
+                {!readOnly && (
+                  <AlertDialog>
+                    <AlertDialogTrigger asChild>
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="icon"
+                        title="Delete comment"
+                        disabled={mutating}
+                      >
+                        <IconTrash className="size-3.5" />
+                      </Button>
+                    </AlertDialogTrigger>
+                    <AlertDialogContent>
+                      <AlertDialogHeader>
+                        <AlertDialogTitle>
+                          Delete this comment?
+                        </AlertDialogTitle>
+                        <AlertDialogDescription>
+                          {index === 0 && replies.length > 0
+                            ? "This permanently removes the comment and its replies from comments.json."
+                            : "This permanently removes the comment from comments.json."}
+                        </AlertDialogDescription>
+                      </AlertDialogHeader>
+                      <AlertDialogFooter>
+                        <AlertDialogCancel>Cancel</AlertDialogCancel>
+                        <AlertDialogAction
+                          onClick={() => void onDelete(item.id)}
+                        >
+                          Delete
+                        </AlertDialogAction>
+                      </AlertDialogFooter>
+                    </AlertDialogContent>
+                  </AlertDialog>
+                )}
+              </div>
+            )}
+          </div>
+        ))}
+      </div>
+      {replying && (
+        <form
+          className="mt-3 ml-4 border-l border-border pl-3"
+          onSubmit={async (event) => {
+            event.preventDefault();
+            const next = reply.trim();
+            if (!next || mutating) return;
+            await onAdd(next, comment.id);
+            setReply("");
+            setReplying(false);
+          }}
+        >
+          <Textarea
+            aria-label="Reply"
+            value={reply}
+            onChange={(event) => setReply(event.target.value)}
+            rows={2}
+            className="resize-none"
+          />
+          <div className="mt-2 flex gap-2">
+            <Button size="sm" disabled={!reply.trim() || mutating}>
+              <IconSend className="size-3.5" /> Reply
+            </Button>
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              onClick={() => setReplying(false)}
+            >
+              Cancel
+            </Button>
+          </div>
+        </form>
+      )}
+    </article>
+  );
+}
+
 export function LocalPlanEditor({ sessionId }: { sessionId: string }) {
+  const tailnetViewer =
+    typeof window !== "undefined" &&
+    window.location.hostname.endsWith(".ts.net");
   const [session, setSession] = useState<LocalSession | null>(null);
   const [content, setContent] = useState<PlanContent | null>(null);
   const [comments, setComments] = useState<PlanComment[]>([]);
@@ -147,6 +416,9 @@ export function LocalPlanEditor({ sessionId }: { sessionId: string }) {
   const [saveState, setSaveState] = useState<SaveState>("idle");
   const [conflict, setConflict] = useState<Conflict | null>(null);
   const [commentsOpen, setCommentsOpen] = useState(false);
+  const [commentsMutating, setCommentsMutating] = useState(false);
+  const [sendingToAgent, setSendingToAgent] = useState(false);
+  const [publishing, setPublishing] = useState(false);
   const { resolvedTheme, setTheme } = useTheme();
   const saveTimer = useRef<number | null>(null);
   const savePromise = useRef<Promise<void> | null>(null);
@@ -160,7 +432,8 @@ export function LocalPlanEditor({ sessionId }: { sessionId: string }) {
     try {
       const next = await loadSession(sessionId);
       const nextContent = next.bundle.plan.content;
-      if (!nextContent) throw new Error("The local daemon returned no content.");
+      if (!nextContent)
+        throw new Error("The local daemon returned no content.");
       setSession(next);
       sessionRef.current = next;
       setContent(nextContent);
@@ -169,7 +442,9 @@ export function LocalPlanEditor({ sessionId }: { sessionId: string }) {
       setSaveState("idle");
       setConflict(null);
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : "Could not load this plan.");
+      setError(
+        cause instanceof Error ? cause.message : "Could not load this plan.",
+      );
     } finally {
       setLoading(false);
     }
@@ -190,7 +465,11 @@ export function LocalPlanEditor({ sessionId }: { sessionId: string }) {
     const operation = (async () => {
       try {
         const serialized = await serializeLocalPlan({
-          data: { sessionId, content: savingContent, files: activeSession.files },
+          data: {
+            sessionId,
+            content: savingContent,
+            files: activeSession.files,
+          },
         });
         const names = Object.keys(serialized).filter(
           (name): name is PlanFilename =>
@@ -210,16 +489,26 @@ export function LocalPlanEditor({ sessionId }: { sessionId: string }) {
         try {
           const saved = await saveFiles(
             sessionId,
-            Object.fromEntries(names.map((name) => [name, {
-              content: serialized[name] as string,
-              revision: revisions[name] ?? null,
-            }])),
+            Object.fromEntries(
+              names.map((name) => [
+                name,
+                {
+                  content: serialized[name] as string,
+                  revision: revisions[name] ?? null,
+                },
+              ]),
+            ),
           );
           revisions = { ...revisions, ...saved };
         } catch (cause) {
           if (cause instanceof LocalApiError && cause.status === 409) {
-            const file = names.find((name) => conflictRevision(cause)) ?? names[0];
-            setConflict({ message: cause.message, file, revision: conflictRevision(cause) });
+            const file =
+              names.find((name) => conflictRevision(cause)) ?? names[0];
+            setConflict({
+              message: cause.message,
+              file,
+              revision: conflictRevision(cause),
+            });
           }
           throw cause;
         }
@@ -272,18 +561,108 @@ export function LocalPlanEditor({ sessionId }: { sessionId: string }) {
       scheduleSave(applyContentPatch(current, patch));
     } catch (cause) {
       setSaveState("error");
-      toast.error(cause instanceof Error ? cause.message : "Could not apply edit.");
+      toast.error(
+        cause instanceof Error ? cause.message : "Could not apply edit.",
+      );
     }
   };
 
-  const submitComment = async (message: string) => {
+  const setCommentState = (nextComments: PlanComment[], revision: string) => {
+    setComments(nextComments);
+    const active = sessionRef.current;
+    if (!active) return;
+    const next = {
+      ...active,
+      comments: nextComments,
+      revisions: { ...active.revisions, "comments.json": revision },
+    };
+    setSession(next);
+    sessionRef.current = next;
+  };
+
+  const submitComment = async (message: string, parentCommentId?: string) => {
+    if (commentsMutating) return;
+    setCommentsMutating(true);
     try {
-      const next = await addComment(sessionId, message);
-      setComments((current) => [...current, next]);
-      toast.success("Comment saved locally");
+      const saved = await addComment(sessionId, message, parentCommentId);
+      setCommentState(saved.comments, saved.revision);
+      toast.success(
+        parentCommentId ? "Reply saved locally" : "Comment saved locally",
+      );
     } catch (cause) {
-      toast.error(cause instanceof Error ? cause.message : "Could not save comment.");
+      toast.error(
+        cause instanceof Error ? cause.message : "Could not save comment.",
+      );
       throw cause;
+    } finally {
+      setCommentsMutating(false);
+    }
+  };
+
+  const persistComments = async (nextComments: PlanComment[]) => {
+    if (commentsMutating) return;
+    setCommentsMutating(true);
+    try {
+      const saved = await saveComments(
+        sessionId,
+        nextComments,
+        sessionRef.current?.revisions["comments.json"] ?? null,
+      );
+      setCommentState(saved.comments, saved.revision);
+      toast.success("Comments updated locally");
+    } catch (cause) {
+      toast.error(
+        cause instanceof Error ? cause.message : "Could not update comments.",
+      );
+      throw cause;
+    } finally {
+      setCommentsMutating(false);
+    }
+  };
+
+  const updateComment = async (
+    id: string,
+    patch: Partial<Pick<PlanComment, "message" | "status">>,
+  ) => persistComments(updateLocalComment(comments, id, patch));
+
+  const deleteComment = async (id: string) =>
+    persistComments(deleteLocalComment(comments, id));
+
+  const dispatchToAgent = async () => {
+    if (sendingToAgent) return;
+    setSendingToAgent(true);
+    try {
+      const { harness, threadId, url } = await sendPlanToAgent(sessionId);
+      toast.success(`Sent to ${harness} task ${threadId}`);
+      if (url) window.location.href = url;
+    } catch (cause) {
+      toast.error(
+        cause instanceof Error ? cause.message : "Could not send to agent.",
+      );
+      throw cause;
+    } finally {
+      setSendingToAgent(false);
+    }
+  };
+
+  const publishToTailnet = async () => {
+    if (publishing) return;
+    setPublishing(true);
+    try {
+      const { url } = await publishPlanToTailnet(sessionId);
+      try {
+        await navigator.clipboard.writeText(url);
+        toast.success("Tailnet URL copied");
+      } catch {
+        toast.success(`Published to ${url}`);
+      }
+    } catch (cause) {
+      toast.error(
+        cause instanceof Error ? cause.message : "Could not publish plan.",
+      );
+      throw cause;
+    } finally {
+      setPublishing(false);
     }
   };
 
@@ -302,13 +681,17 @@ export function LocalPlanEditor({ sessionId }: { sessionId: string }) {
     const conflictFile = conflict.file;
     setConflict(null);
     setSaveState("dirty");
-    toast.warning(`${conflictFile} disk revision accepted. Saving your version.`);
+    toast.warning(
+      `${conflictFile} disk revision accepted. Saving your version.`,
+    );
     window.setTimeout(() => void persist(), 0);
   };
 
   const copyUnsaved = async () => {
     if (!contentRef.current) return;
-    await navigator.clipboard.writeText(JSON.stringify(contentRef.current, null, 2));
+    await navigator.clipboard.writeText(
+      JSON.stringify(contentRef.current, null, 2),
+    );
     toast.success("Unsaved plan JSON copied");
   };
 
@@ -323,7 +706,9 @@ export function LocalPlanEditor({ sessionId }: { sessionId: string }) {
   if (loading && !content) {
     return (
       <main className="grid min-h-screen place-items-center bg-background text-foreground">
-        <p className="animate-pulse text-sm text-muted-foreground">Opening local plan…</p>
+        <p className="animate-pulse text-sm text-muted-foreground">
+          Opening local plan…
+        </p>
       </main>
     );
   }
@@ -333,8 +718,12 @@ export function LocalPlanEditor({ sessionId }: { sessionId: string }) {
       <main className="grid min-h-screen place-items-center bg-background p-6 text-foreground">
         <div className="max-w-md text-center">
           <IconAlertTriangle className="mx-auto size-8 text-destructive" />
-          <h1 className="mt-4 text-xl font-semibold">Could not open this plan</h1>
-          <p className="mt-2 text-sm leading-6 text-muted-foreground">{error}</p>
+          <h1 className="mt-4 text-xl font-semibold">
+            Could not open this plan
+          </h1>
+          <p className="mt-2 text-sm leading-6 text-muted-foreground">
+            {error}
+          </p>
           <Button className="mt-5" onClick={() => void refresh()}>
             <IconRefresh className="size-4" /> Retry
           </Button>
@@ -354,16 +743,38 @@ export function LocalPlanEditor({ sessionId }: { sessionId: string }) {
           </p>
         </div>
         <div className="ml-auto flex items-center gap-1">
-          <Button variant="ghost" size="icon" title="Reload from disk" onClick={() => void refresh()}>
+          {!tailnetViewer && (
+            <Button
+              variant="ghost"
+              size="sm"
+              disabled={publishing}
+              onClick={() => void publishToTailnet()}
+            >
+              <IconNetwork className="size-4" />
+              {publishing ? "Publishing…" : "Publish to tailnet"}
+            </Button>
+          )}
+          <Button
+            variant="ghost"
+            size="icon"
+            title="Reload from disk"
+            onClick={() => void refresh()}
+          >
             <IconRefresh className="size-4" />
           </Button>
           <Button
             variant="ghost"
             size="icon"
             title="Toggle theme"
-            onClick={() => setTheme(resolvedTheme === "dark" ? "light" : "dark")}
+            onClick={() =>
+              setTheme(resolvedTheme === "dark" ? "light" : "dark")
+            }
           >
-            {resolvedTheme === "dark" ? <IconSun className="size-4" /> : <IconMoon className="size-4" />}
+            {resolvedTheme === "dark" ? (
+              <IconSun className="size-4" />
+            ) : (
+              <IconMoon className="size-4" />
+            )}
           </Button>
           <Button
             variant={commentsOpen ? "secondary" : "ghost"}
@@ -382,10 +793,15 @@ export function LocalPlanEditor({ sessionId }: { sessionId: string }) {
           <div className="min-w-[16rem] flex-1">
             <p className="text-sm font-semibold">The plan changed on disk</p>
             <p className="text-xs opacity-80">
-              Your unsaved editor content is preserved. Reload to use disk content, or explicitly accept its revision before overwriting it.
+              Your unsaved editor content is preserved. Reload to use disk
+              content, or explicitly accept its revision before overwriting it.
             </p>
           </div>
-          <Button variant="outline" size="sm" onClick={() => void copyUnsaved()}>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => void copyUnsaved()}
+          >
             <IconCopy className="size-4" /> Copy mine
           </Button>
           <Button variant="outline" size="sm" onClick={() => void refresh()}>
@@ -404,40 +820,76 @@ export function LocalPlanEditor({ sessionId }: { sessionId: string }) {
             content={content}
             fallbackTitle={title}
             fallbackBrief={content.brief || session.bundle.plan.brief || ""}
-            onContentChange={scheduleSave}
-            onContentPatch={onPatch}
-            onMetadataChange={(patch) =>
-              scheduleSave({
-                ...contentRef.current!,
-                title: patch.title ?? contentRef.current!.title,
-                brief: patch.brief ?? contentRef.current!.brief,
-              })
+            onContentChange={tailnetViewer ? undefined : scheduleSave}
+            onContentPatch={tailnetViewer ? undefined : onPatch}
+            onMetadataChange={
+              tailnetViewer
+                ? undefined
+                : (patch) =>
+                    scheduleSave({
+                      ...contentRef.current!,
+                      title: patch.title ?? contentRef.current!.title,
+                      brief: patch.brief ?? contentRef.current!.brief,
+                    })
             }
-            onCanvasViewportChange={(viewport) => {
-              const current = contentRef.current;
-              if (!current?.canvas) return;
-              scheduleSave({
-                ...current,
-                canvas: { ...current.canvas, viewport },
-              });
-            }}
+            onCanvasViewportChange={
+              tailnetViewer
+                ? undefined
+                : (viewport) => {
+                    const current = contentRef.current;
+                    if (!current?.canvas) return;
+                    scheduleSave({
+                      ...current,
+                      canvas: { ...current.canvas, viewport },
+                    });
+                  }
+            }
             contentUpdatedAt={session.bundle.plan.updatedAt}
             planId={session.id}
             localOnly
           />
         </main>
-        <CommentRail comments={comments} onSubmit={submitComment} />
+        <CommentRail
+          className="max-lg:hidden"
+          comments={comments}
+          mutating={commentsMutating}
+          onAdd={submitComment}
+          onDelete={tailnetViewer ? async () => undefined : deleteComment}
+          onSendToAgent={
+            tailnetViewer ? async () => undefined : dispatchToAgent
+          }
+          onUpdate={tailnetViewer ? async () => undefined : updateComment}
+          sendingToAgent={sendingToAgent}
+          readOnly={tailnetViewer}
+        />
       </div>
 
       {commentsOpen && (
         <div className="fixed inset-x-0 bottom-0 z-40 h-[70dvh] border-t border-border bg-background shadow-2xl lg:hidden">
           <div className="flex h-12 items-center border-b border-border px-4">
             <span className="text-sm font-medium">Comments</span>
-            <Button className="ml-auto" variant="ghost" size="sm" onClick={() => setCommentsOpen(false)}>
+            <Button
+              className="ml-auto"
+              variant="ghost"
+              size="sm"
+              onClick={() => setCommentsOpen(false)}
+            >
               Close
             </Button>
           </div>
-          <CommentRail comments={comments} onSubmit={submitComment} />
+          <CommentRail
+            className="h-[calc(70dvh-3rem)] w-full border-l-0"
+            comments={comments}
+            mutating={commentsMutating}
+            onAdd={submitComment}
+            onDelete={tailnetViewer ? async () => undefined : deleteComment}
+            onSendToAgent={
+              tailnetViewer ? async () => undefined : dispatchToAgent
+            }
+            onUpdate={tailnetViewer ? async () => undefined : updateComment}
+            sendingToAgent={sendingToAgent}
+            readOnly={tailnetViewer}
+          />
         </div>
       )}
     </div>

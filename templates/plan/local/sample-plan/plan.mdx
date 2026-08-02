@@ -4,7 +4,9 @@ brief: "Exercises editable documents, local assets, canvas, prototype, comments,
 version: 2
 planId: "plan_local_complete_sample"
 source: "agent-native-plan"
+harness: "codex"
 ---
+
 
 <RichText id="overview" title="Overview">
 
@@ -24,9 +26,21 @@ Every browser request for this plan must stay on `127.0.0.1`.
   id="acceptance"
   title="Acceptance checklist"
   items={[
-    { id: "document", label: "Document edit survives reload", checked: false },
-    { id: "canvas", label: "Canvas renders its saved viewport", checked: true },
-    { id: "prototype", label: "Prototype navigation works", checked: true },
+    {
+      id: "document",
+      label: "Document edit survives reload",
+      checked: false,
+    },
+    {
+      id: "canvas",
+      label: "Canvas renders its saved viewport",
+      checked: true,
+    },
+    {
+      id: "prototype",
+      label: "Prototype navigation works",
+      checked: true,
+    },
     {
       id: "comments",
       label: "Comments persist to comments.json",
@@ -81,22 +95,11 @@ Every browser request for this plan must stay on `127.0.0.1`.
   ]}
 />
 
-<Decision
-  id="completion"
-  title="Completion rule"
-  question="When is the local editor ready?"
-  options={[
-    {
-      id: "all",
-      label: "All surfaces pass",
-      detail:
-        "Document, canvas, prototype, comments, assets, state, reload, and network-boundary checks pass.",
-      recommended: true,
-    },
-    {
-      id: "build",
-      label: "Build only",
-      detail: "Compilation alone does not verify the runtime contract.",
-    },
-  ]}
-/>
+<Callout id="completion" title="Completion rule" tone="decision">
+
+**When is the local editor ready?**
+
+- **All surfaces pass** — recommended: Document, canvas, prototype, comments, assets, state, reload, and network-boundary checks pass.
+- **Build only**: Compilation alone does not verify the runtime contract.
+
+</Callout>

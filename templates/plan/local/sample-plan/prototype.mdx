@@ -1,47 +1,8 @@
-<Prototype
-  title="Local review prototype"
-  brief="A two-screen click-through."
-  surface="browser"
-  initialScreenId="welcome"
->
-  <PrototypeScreen
-    id="welcome"
-    title="Welcome"
-    summary="Start the local review"
-    surface="browser"
-    renderMode="design"
-    html={
-      '<main class="prototype-sample"><h1>Local review</h1><p>Open every supported surface.</p><button data-goto="confirmation">Continue</button></main>'
-    }
-    css={
-      ".prototype-sample { padding: 32px; font-family: sans-serif; } .prototype-sample button { padding: 10px 16px; }"
-    }
-  />
-  <PrototypeScreen
-    id="confirmation"
-    title="Confirmation"
-    summary="Review complete"
-    surface="browser"
-    renderMode="design"
-    html={
-      '<main class="prototype-sample"><h1>Review complete</h1><p>Return to repeat the navigation.</p><button data-goto="welcome">Start over</button></main>'
-    }
-    css={
-      ".prototype-sample { padding: 32px; font-family: sans-serif; color: #14532d; }"
-    }
-  />
-  <PrototypeTransition
-    id="continue"
-    from="welcome"
-    to="confirmation"
-    label="Continue"
-    trigger="click Continue"
-  />
-  <PrototypeTransition
-    id="restart"
-    from="confirmation"
-    to="welcome"
-    label="Start over"
-    trigger="click Start over"
-  />
+<Prototype title="Local review prototype" brief="A two-screen click-through." surface="browser" initialScreenId="welcome">
+<PrototypeScreen id="welcome" title="Welcome" summary="Start the local review" surface="browser" renderMode="design" html={"<main class=\"prototype-sample\"><h1>Local review</h1><p>Open every supported surface.</p><button data-goto=\"confirmation\">Continue</button></main>"} css={".prototype-sample { padding: 32px; font-family: sans-serif; } .prototype-sample button { padding: 10px 16px; }"} />
+
+<PrototypeScreen id="confirmation" title="Confirmation" summary="Review complete" surface="browser" renderMode="design" html={"<main class=\"prototype-sample\"><h1>Review complete</h1><p>Return to repeat the navigation.</p><button data-goto=\"welcome\">Start over</button></main>"} css={".prototype-sample { padding: 32px; font-family: sans-serif; color: #14532d; }"} />
+
+<PrototypeTransition id="continue" from="welcome" to="confirmation" label="Continue" trigger="click Continue" />
+<PrototypeTransition id="restart" from="confirmation" to="welcome" label="Start over" trigger="click Start over" />
 </Prototype>
