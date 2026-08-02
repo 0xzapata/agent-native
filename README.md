@@ -1,5 +1,10 @@
 # Agent-Native
 
+> Local fork notice: this checkout is pinned to upstream commit
+> `d04621c8cdab6e090a0557792cc9be8c93d94c79`. The local Plan editor is private,
+> local-only, and must not be published or redistributed. See
+> [`LOCAL_ONLY.md`](./LOCAL_ONLY.md).
+
 
 ## The framework for agentic apps
 

@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 180" role="img" aria-labelledby="title description">
+  <title id="title">Local plan sample mark</title>
+  <desc id="description">A green loopback path connecting document, canvas, prototype, and feedback nodes.</desc>
+  <rect width="320" height="180" rx="24" fill="#ecfdf5"/>
+  <path d="M56 90h48m32 0h48m32 0h48" stroke="#047857" stroke-width="8" stroke-linecap="round"/>
+  <circle cx="48" cy="90" r="22" fill="#10b981"/>
+  <circle cx="128" cy="90" r="22" fill="#34d399"/>
+  <circle cx="208" cy="90" r="22" fill="#6ee7b7"/>
+  <circle cx="288" cy="90" r="22" fill="#a7f3d0"/>
+</svg>
+

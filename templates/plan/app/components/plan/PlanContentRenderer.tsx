@@ -36,7 +36,10 @@ import {
 } from "react";
 
 import { Button } from "@/components/ui/button";
-import { usePlanPresence } from "@/hooks/use-plan-presence";
+import {
+  EMPTY_PLAN_PRESENCE,
+  usePlanPresence,
+} from "@/hooks/use-plan-presence";
 import { cn } from "@/lib/utils";
 
 import {
@@ -121,6 +124,8 @@ type PlanContentRendererProps = {
   sourceUrl?: string | null;
   visualSurfaceMode?: PlanVisualSurfaceMode;
   onVisualSurfaceModeChange?: (mode: PlanVisualSurfaceMode) => void;
+  /** Disable every collaboration request in the standalone localhost editor. */
+  localOnly?: boolean;
 };
 
 /**
@@ -197,6 +202,7 @@ export function PlanContentRenderer({
   showCodeAnnotationOverlays = false,
   recapScreenshotTheme = null,
   sourceUrl,
+  localOnly = false,
 }: PlanContentRendererProps) {
   const t = useT();
   // Deep-link scroll on load/reload/back-forward (TOC clicks aside).
@@ -221,12 +227,15 @@ export function PlanContentRenderer({
         : undefined,
     [collabUser?.email, collabUser?.name, collabUser?.color],
   );
+  const collaborationPlanId = localOnly ? null : planId;
+  const collaborationUser = localOnly ? null : collabUser;
+  const remotePresence = usePlanPresence({
+    planId: collaborationPlanId,
+    enabled: !!collaborationPlanId && !isRecap,
+    user: localOnly ? undefined : presenceUser,
+  });
   const { activeUsers, agentPresent, agentActive, recentEdits, collabDoc } =
-    usePlanPresence({
-      planId,
-      enabled: !!planId && !isRecap,
-      user: presenceUser,
-    });
+    localOnly ? EMPTY_PLAN_PRESENCE : remotePresence;
   const documentRegionRef = useRef<HTMLDivElement>(null);
   const resolvePlanEditRect = useCallback(
     (edit: AttributedRecentEdit): DOMRect | null => {
@@ -518,8 +527,8 @@ export function PlanContentRenderer({
       createPlanBlockRenderContext({
         textDirection: documentDirection,
         contentUpdatedAt,
-        planId,
-        collabUser,
+        planId: collaborationPlanId,
+        collabUser: collaborationUser,
         onRichTextChange: (blockId, markdown) =>
           handlersRef.current.updateRichTextBlock(blockId, markdown),
         onVisualQuestionsSubmit: (summary) =>
@@ -552,8 +561,8 @@ export function PlanContentRenderer({
                     block={block}
                     editingDisabled
                     contentUpdatedAt={contentUpdatedAt}
-                    planId={planId}
-                    collabUser={collabUser}
+                    planId={collaborationPlanId}
+                    collabUser={collaborationUser}
                   />
                 ))}
               </div>
@@ -563,8 +572,8 @@ export function PlanContentRenderer({
               key={`${containerBlockId}::${regionId}`}
               blocks={blocks as PlanBlock[]}
               contentUpdatedAt={contentUpdatedAt}
-              planId={planId}
-              collabUser={collabUser}
+              planId={collaborationPlanId}
+              collabUser={collaborationUser}
               editable={editable && !handlersRef.current.editingDisabled}
               onBlocksChange={(nextBlocks) => onChange(nextBlocks)}
               onVisualQuestionsSubmit={(summary) =>
@@ -585,8 +594,8 @@ export function PlanContentRenderer({
     [
       contentUpdatedAt,
       documentDirection,
-      planId,
-      collabUser,
+      collaborationPlanId,
+      collaborationUser,
       editingDisabled,
       notionCompatibleOnly,
       showCodeAnnotationOverlays,
@@ -895,8 +904,8 @@ export function PlanContentRenderer({
                               onVisualQuestionsSubmit={onVisualQuestionsSubmit}
                               contentUpdatedAt={contentUpdatedAt}
                               editingDisabled
-                              planId={planId}
-                              collabUser={collabUser}
+                              planId={collaborationPlanId}
+                              collabUser={collaborationUser}
                             />,
                           ),
                         )}
@@ -904,8 +913,8 @@ export function PlanContentRenderer({
                         <LazyPlanDocumentEditor
                           content={content}
                           contentUpdatedAt={contentUpdatedAt}
-                          planId={planId}
-                          collabUser={collabUser}
+                          planId={collaborationPlanId}
+                          collabUser={collaborationUser}
                           editable
                           onBlocksChange={replaceBlocks}
                           onVisualQuestionsSubmit={onVisualQuestionsSubmit}
@@ -929,8 +938,8 @@ export function PlanContentRenderer({
                             onVisualQuestionsSubmit={onVisualQuestionsSubmit}
                             contentUpdatedAt={contentUpdatedAt}
                             editingDisabled={editingDisabled}
-                            planId={planId}
-                            collabUser={collabUser}
+                            planId={collaborationPlanId}
+                            collabUser={collaborationUser}
                           />,
                         ),
                       )
@@ -950,8 +959,8 @@ export function PlanContentRenderer({
                             onVisualQuestionsSubmit={onVisualQuestionsSubmit}
                             contentUpdatedAt={contentUpdatedAt}
                             editingDisabled={editingDisabled}
-                            planId={planId}
-                            collabUser={collabUser}
+                            planId={collaborationPlanId}
+                            collabUser={collaborationUser}
                           />,
                         ),
                       )}

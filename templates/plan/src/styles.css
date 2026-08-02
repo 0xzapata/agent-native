@@ -1,0 +1,17 @@
+@import "../app/global.css";
+
+@source "./**/*.{ts,tsx}";
+
+body {
+  margin: 0;
+}
+
+.local-plan-shell {
+  min-height: 100dvh;
+  background: hsl(var(--background));
+}
+
+.local-plan-toolbar {
+  background: color-mix(in srgb, hsl(var(--background)) 92%, transparent);
+  backdrop-filter: blur(14px);
+}

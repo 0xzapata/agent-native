@@ -1,0 +1,13 @@
+[
+  {
+    "id": "cmt_sample_seed",
+    "planId": "plan_local_complete_sample",
+    "kind": "annotation",
+    "status": "open",
+    "message": "Seed feedback loaded from comments.json.",
+    "createdBy": "human",
+    "authorName": "Local reviewer",
+    "createdAt": "2026-08-01T00:00:00.000Z",
+    "updatedAt": "2026-08-01T00:00:00.000Z"
+  }
+]

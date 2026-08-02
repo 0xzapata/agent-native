@@ -636,7 +636,7 @@ function frontmatter(data: Record<string, unknown>): string {
   return `---\n${lines.join("\n")}\n---\n\n`;
 }
 
-function parseSimpleFrontmatter(source: string): {
+export function parseSimpleFrontmatter(source: string): {
   data: Record<string, unknown>;
   content: string;
 } {
@@ -895,7 +895,7 @@ export async function exportPlanContentToMdxFolder(
   return folder;
 }
 
-function serializePrototype(prototype: PlanPrototype): string {
+export function serializePrototype(prototype: PlanPrototype): string {
   const screens = prototype.screens
     .map(
       (screen) =>
@@ -921,7 +921,7 @@ function serializeCanvasSourceComment(visualUrl: string | undefined): string {
   return `{/* Canvas source. */}\n\n`;
 }
 
-function serializeCanvas(content: PlanContent, visualUrl?: string): string {
+export function serializeCanvas(content: PlanContent, visualUrl?: string): string {
   const canvas = content.canvas;
   if (!canvas) return "";
   const frameById = new Map(canvas.frames.map((frame) => [frame.id, frame]));
@@ -940,7 +940,7 @@ function serializeCanvas(content: PlanContent, visualUrl?: string): string {
       const artboardIds = section.artboardIds ?? canvas.frames.map((f) => f.id);
       const artboards = artboardIds
         .map((id) => frameById.get(id))
-        .filter(Boolean)
+        .filter((frame): frame is PlanArtboard => Boolean(frame))
         .map((frame) => {
           emitted.add(frame.id);
           return serializeArtboard(frame, "    ");

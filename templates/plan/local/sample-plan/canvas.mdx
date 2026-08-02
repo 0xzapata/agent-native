@@ -1,0 +1,17 @@
+{/* Canvas source. */}
+
+<DesignBoard title="Local Editor Review Board" mode="design" version={2}>
+  <Section id="main-flow" title="Primary flow" subtitle="Two persisted artboards">
+    <Artboard id="canvas-welcome" label="Welcome" surface="browser" x={40} y={60} width={520} height={340} order={0}>
+      <Screen surface="browser" renderMode="design" html={"<main class=\"sample-screen\"><h1>Local plan editor</h1><p>Review every surface from one folder.</p><button>Start review</button></main>"} css={".sample-screen { padding: 28px; font-family: sans-serif; } .sample-screen button { padding: 8px 14px; }"} />
+    </Artboard>
+
+    <Artboard id="canvas-confirmation" label="Confirmation" surface="browser" x={680} y={60} width={520} height={340} order={1}>
+      <Screen surface="browser" renderMode="design" html={"<main class=\"sample-screen\"><h1>All local</h1><p>The sample is ready for agent feedback.</p></main>"} css={".sample-screen { padding: 28px; font-family: sans-serif; color: #14532d; }"} />
+    </Artboard>
+  </Section>
+
+  <Annotation id="canvas-note" type="note" title="Network boundary" targetId="canvas-confirmation" placement="right" x={1250} y={120} text="No hosted Plan endpoint is required." />
+
+  <Connector from="canvas-welcome" to="canvas-confirmation" label="complete review" />
+</DesignBoard>

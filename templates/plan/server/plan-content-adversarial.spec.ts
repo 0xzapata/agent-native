@@ -416,6 +416,50 @@ describe("structural validation", () => {
     expect(result.success).toBe(false);
   });
 
+  it.each([
+    ["assets/screenshot.png", "assets/screenshot.png"],
+    ["./assets/screenshot.png", "assets/screenshot.png"],
+    ["././assets/./screenshot.png", "assets/screenshot.png"],
+  ])("accepts and normalizes a safe local asset URL: %s", (url, expected) => {
+    const result = planContentSchema.parse({
+      version: 2,
+      brief: "x",
+      blocks: [{ id: "img", type: "image", data: { alt: "x", url } }],
+    });
+    const block = result.blocks[0];
+    expect(block?.type).toBe("image");
+    if (block?.type === "image") expect(block.data.url).toBe(expected);
+  });
+
+  it.each([
+    "assets/../secret.png",
+    "../assets/secret.png",
+    "assets/nested/secret.png",
+    "assets\\secret.png",
+    "assets//secret.png",
+  ])("rejects an unsafe local asset URL: %s", (url) => {
+    const result = planContentSchema.safeParse({
+      version: 2,
+      brief: "x",
+      blocks: [{ id: "img", type: "image", data: { alt: "x", url } }],
+    });
+    expect(result.success).toBe(false);
+  });
+
+  it.each([
+    "javascript:alert(1)",
+    "data:image/png;base64,AAAA",
+    "file:///tmp/x.png",
+    "mailto:x@example.com",
+  ])("rejects a non-web image URL: %s", (url) => {
+    const result = planContentSchema.safeParse({
+      version: 2,
+      brief: "x",
+      blocks: [{ id: "img", type: "image", data: { alt: "x", url } }],
+    });
+    expect(result.success).toBe(false);
+  });
+
   it("rejects a titled artboard with no interior wireframe content", () => {
     const result = planContentSchema.safeParse({
       version: 2,

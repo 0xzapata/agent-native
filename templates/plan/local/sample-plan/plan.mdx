@@ -1,0 +1,105 @@
+---
+title: "Local Editor Complete Sample"
+brief: "Exercises editable documents, local assets, canvas, prototype, comments, and persisted editor state."
+version: 2
+planId: "plan_local_complete_sample"
+source: "agent-native-plan"
+harness: "codex"
+---
+
+
+<RichText id="overview" title="Overview">
+
+## Local-first review flow
+
+This sample deliberately touches every local editor surface. Edit this paragraph, inspect the image, move around the canvas, click through the prototype, and leave feedback without sending plan content off-device.
+
+</RichText>
+
+<Callout id="local-only" title="Privacy boundary" tone="info">
+
+Every browser request for this plan must stay on `127.0.0.1`.
+
+</Callout>
+
+<Checklist
+  id="acceptance"
+  title="Acceptance checklist"
+  items={[
+    {
+      id: "document",
+      label: "Document edit survives reload",
+      checked: false,
+    },
+    {
+      id: "canvas",
+      label: "Canvas renders its saved viewport",
+      checked: true,
+    },
+    {
+      id: "prototype",
+      label: "Prototype navigation works",
+      checked: true,
+    },
+    {
+      id: "comments",
+      label: "Comments persist to comments.json",
+      checked: false,
+    },
+    {
+      id: "asset",
+      label: "Local asset is served by the daemon",
+      checked: true,
+    },
+  ]}
+/>
+
+<Table
+  id="coverage"
+  title="Coverage map"
+  columns={["Surface", "Proof"]}
+  rows={[
+    ["Document", "Edit title, summary, and prose"],
+    ["Canvas", "Frames, annotations, connectors, viewport"],
+    ["Prototype", "Welcome to confirmation navigation"],
+    ["Feedback", "Read and append comments"],
+    ["Assets", "Fetch a repository-local SVG"],
+  ]}
+/>
+
+<Image
+  id="sample-asset"
+  title="Local asset"
+  url="assets/local-plan-mark.svg"
+  alt="Local plan sample mark"
+  caption="Served only by the loopback daemon."
+  fit="contain"
+/>
+
+<CodeTabs
+  id="commands"
+  title="Local commands"
+  tabs={[
+    {
+      id: "check",
+      label: "Validate",
+      language: "sh",
+      code: "pnpm local check --dir local/sample-plan",
+    },
+    {
+      id: "open",
+      label: "Open",
+      language: "sh",
+      code: "pnpm local open --dir local/sample-plan",
+    },
+  ]}
+/>
+
+<Callout id="completion" title="Completion rule" tone="decision">
+
+**When is the local editor ready?**
+
+- **All surfaces pass** — recommended: Document, canvas, prototype, comments, assets, state, reload, and network-boundary checks pass.
+- **Build only**: Compilation alone does not verify the runtime contract.
+
+</Callout>
