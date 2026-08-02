@@ -119,4 +119,77 @@ describe("local Tailscale publishing", () => {
     );
     expect(run).toHaveBeenCalledTimes(2);
   });
+
+  it("rejects invalid session ids before calling Tailscale", async () => {
+    const run = vi.fn();
+    await expect(publishPlanToTailnet("short/id", run)).rejects.toThrow(
+      /Invalid plan session id/,
+    );
+    expect(run).not.toHaveBeenCalled();
+  });
+
+  it("requires a connected Tailscale backend", async () => {
+    const run = vi.fn().mockResolvedValue({
+      stdout: JSON.stringify({ BackendState: "Stopped" }),
+    });
+    await expect(publishPlanToTailnet(sessionId, run)).rejects.toThrow(
+      /must be connected/,
+    );
+  });
+
+  it("requires a tailnet MagicDNS name", async () => {
+    const run = vi.fn().mockResolvedValue({
+      stdout: JSON.stringify({
+        BackendState: "Running",
+        Self: { DNSName: "example.com." },
+      }),
+    });
+    await expect(publishPlanToTailnet(sessionId, run)).rejects.toThrow(
+      /MagicDNS and HTTPS/,
+    );
+  });
+
+  it("reports malformed JSON with its Tailscale command", async () => {
+    const run = vi.fn().mockResolvedValue({ stdout: "not json" });
+    await expect(publishPlanToTailnet(sessionId, run)).rejects.toThrow(
+      'Could not read "tailscale status --json" output.',
+    );
+  });
+
+  it.each([
+    { TCP: { [TAILSCALE_HTTPS_PORT]: {} } },
+    {
+      TCP: { [TAILSCALE_HTTPS_PORT]: { HTTPS: true } },
+      Web: {
+        [`mac.example.ts.net:${TAILSCALE_HTTPS_PORT}`]: {
+          Handlers: { "/": { Proxy: "http://127.0.0.1:3000" } },
+        },
+      },
+    },
+    {
+      TCP: { [TAILSCALE_HTTPS_PORT]: { HTTPS: true } },
+      Web: {
+        [`mac.example.ts.net:${TAILSCALE_HTTPS_PORT}`]: {
+          Handlers: { "/": { Proxy: "http://127.0.0.1:8105" } },
+        },
+      },
+      AllowFunnel: { [`mac.example.ts.net:${TAILSCALE_HTTPS_PORT}`]: true },
+    },
+  ])("rejects an invalid post-publish read-back", async (verified) => {
+    const run = vi
+      .fn()
+      .mockResolvedValueOnce({
+        stdout: JSON.stringify({
+          BackendState: "Running",
+          Self: { DNSName: "mac.example.ts.net." },
+        }),
+      })
+      .mockResolvedValueOnce({ stdout: "{}" })
+      .mockResolvedValueOnce({ stdout: "published" })
+      .mockResolvedValueOnce({ stdout: JSON.stringify(verified) });
+
+    await expect(publishPlanToTailnet(sessionId, run)).rejects.toThrow(
+      /did not publish/,
+    );
+  });
 });

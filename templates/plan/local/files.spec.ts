@@ -189,6 +189,33 @@ describe("local editor filesystem service", () => {
     renameSpy.mockRestore();
   });
 
+  it("does not overwrite an external edit made after bundle preflight", async () => {
+    const canvas =
+      '<DesignBoard title="A"><Artboard id="a" x={0} y={0} /></DesignBoard>\n';
+    await fs.writeFile(path.join(root, "canvas.mdx"), canvas);
+    const nextPlan = PLAN.replace("Local plan body.", "Bundle edit.");
+    const nextCanvas = canvas.replace('title="A"', 'title="B"');
+    const external = canvas.replace('title="A"', 'title="External"');
+    const rename = fs.rename.bind(fs);
+    vi.spyOn(fs, "rename").mockImplementationOnce(async (...args) => {
+      await rename(...args);
+      await fs.writeFile(path.join(root, "canvas.mdx"), external);
+    });
+
+    await expect(
+      saveFiles(root, {
+        "plan.mdx": { content: nextPlan, revision: revision(PLAN) },
+        "canvas.mdx": { content: nextCanvas, revision: revision(canvas) },
+      }),
+    ).rejects.toBeInstanceOf(RevisionConflictError);
+    expect(await fs.readFile(path.join(root, "plan.mdx"), "utf8")).toBe(
+      nextPlan,
+    );
+    expect(await fs.readFile(path.join(root, "canvas.mdx"), "utf8")).toBe(
+      external,
+    );
+  });
+
   it("round-trips comments with revisions", async () => {
     const comment = {
       id: "cmt_local",

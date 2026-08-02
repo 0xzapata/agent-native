@@ -61,7 +61,9 @@ describe("complete local sample plan", () => {
       ),
     );
     const parsed = await parsePlanMdxFolder(
-      Object.fromEntries(files) as Parameters<typeof parsePlanMdxFolder>[0],
+      Object.fromEntries(files) as unknown as Parameters<
+        typeof parsePlanMdxFolder
+      >[0],
     );
     expect(parsed.blocks.map(({ id }) => id)).toEqual([
       "overview",

@@ -21,8 +21,17 @@ type Run = (
   options: { cwd: string; removeEnv?: string[] },
 ) => Promise<string>;
 
+const MAX_COMMAND_OUTPUT = 1024 * 1024;
+
 const run: Run = async (command, args, options) =>
   new Promise((resolve, reject) => {
+    let settled = false;
+    const finish = (error?: Error, value?: string) => {
+      if (settled) return;
+      settled = true;
+      if (error) reject(error);
+      else resolve(value ?? "");
+    };
     const environment = { ...process.env };
     for (const name of options.removeEnv ?? []) delete environment[name];
     const child = spawn(command, args, {
@@ -32,13 +41,21 @@ const run: Run = async (command, args, options) =>
     });
     let stdout = "";
     let stderr = "";
-    child.stdout.on("data", (chunk) => (stdout += chunk.toString()));
-    child.stderr.on("data", (chunk) => (stderr += chunk.toString()));
-    child.once("error", reject);
-    child.once("exit", (code) =>
+    const append = (current: string, chunk: unknown) => {
+      const next = current + String(chunk);
+      if (next.length > MAX_COMMAND_OUTPUT) {
+        child.kill();
+        finish(new Error(`${command} output exceeded its safety limit.`));
+      }
+      return next.slice(-MAX_COMMAND_OUTPUT);
+    };
+    child.stdout.on("data", (chunk) => (stdout = append(stdout, chunk)));
+    child.stderr.on("data", (chunk) => (stderr = append(stderr, chunk)));
+    child.once("error", (error) => finish(error));
+    child.once("close", (code) =>
       code === 0
-        ? resolve(stdout)
-        : reject(
+        ? finish(undefined, stdout)
+        : finish(
             new Error(
               stderr.trim() || `${command} exited with status ${code}.`,
             ),

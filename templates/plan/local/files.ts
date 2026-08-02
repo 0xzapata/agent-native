@@ -347,6 +347,14 @@ export async function saveFile(
   else if (file === ".plan-state.json") JSON.parse(content);
   else await parsePlanMdxFolder(await mdxFolder(root, { file, content }));
 
+  return writeFile(root, file, content);
+}
+
+async function writeFile(
+  root: string,
+  file: PlanFile,
+  content: string,
+): Promise<FileSnapshot> {
   const target = await writableTarget(root, file);
   await atomicWrite(target, content);
   const saved = await readOptionalFile(root, file);

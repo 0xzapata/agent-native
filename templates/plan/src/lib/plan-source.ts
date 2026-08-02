@@ -12,11 +12,9 @@ import { restoreLocalAssetPaths } from "./asset-paths";
 
 type UnvalidatedPlanContent = Parameters<typeof restoreLocalAssetPaths>[0];
 
-const traversablePlanContentSchema = z
-  .object({
-    blocks: z.array(z.record(z.string(), z.unknown())),
-  })
-  .passthrough();
+const traversablePlanContentSchema = z.looseObject({
+  blocks: z.array(z.record(z.string(), z.unknown())),
+});
 
 const serializeInput = z.object({
   sessionId: z.string().min(1),

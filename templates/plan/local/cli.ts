@@ -138,7 +138,9 @@ async function waitUntilStopped(pid: number): Promise<void> {
 
 async function outputExists(): Promise<boolean> {
   try {
-    const client = await fs.stat(path.join(appDir, "dist", "client"));
+    const client = await fs.stat(
+      path.join(appDir, "dist", "client", "manifest.json"),
+    );
     const server = await fs.stat(
       path.join(
         appDir,
@@ -147,7 +149,7 @@ async function outputExists(): Promise<boolean> {
         packagedRuntime ? "server.mjs" : "server.js",
       ),
     );
-    return client.isDirectory() && server.isFile();
+    return client.isFile() && server.isFile();
   } catch {
     return false;
   }
@@ -177,7 +179,7 @@ async function ensureBuild(
   await run("pnpm", ["build"]);
   if (!(await outputExists()))
     throw new Error(
-      "Build completed without a supported static index.html output.",
+      `Build completed without dist/client/manifest.json and dist/server/${packagedRuntime ? "server.mjs" : "server.js"}.`,
     );
 }
 
@@ -247,29 +249,7 @@ async function openBrowser(url: string): Promise<void> {
   child.unref();
 }
 
-async function commandOpen(): Promise<void> {
-  const root = await canonicalPlanRoot(requiredArgument("--dir"));
-  await validatePlanRoot(root);
-  const expectedHash = await buildHash();
-  const metadata = await readMetadata();
-  await ensureBuild(expectedHash, metadata?.buildHash);
-  const daemon = await start(expectedHash);
-  const response = await fetch(`http://${HOST}:${PORT}/api/register`, {
-    method: "POST",
-    headers: {
-      authorization: `Bearer ${daemon.token}`,
-      "content-type": "application/json",
-    },
-    body: JSON.stringify({ root, harness: detectPlanHarness() }),
-  });
-  const result = (await response.json()) as { url?: string; error?: string };
-  if (!response.ok || !result.url)
-    throw new Error(result.error ?? "Could not register plan folder.");
-  await openBrowser(result.url);
-  process.stdout.write(`${result.url}\n`);
-}
-
-async function commandPublish(): Promise<void> {
+async function registerPlan(): Promise<{ sessionId: string; url: string }> {
   const root = await canonicalPlanRoot(requiredArgument("--dir"));
   await validatePlanRoot(root);
   const expectedHash = await buildHash();
@@ -286,12 +266,23 @@ async function commandPublish(): Promise<void> {
   });
   const result = (await response.json()) as {
     sessionId?: string;
+    url?: string;
     error?: string;
   };
-  if (!response.ok || !result.sessionId) {
+  if (!response.ok || !result.sessionId || !result.url)
     throw new Error(result.error ?? "Could not register plan folder.");
-  }
-  const published = await publishPlanToTailnet(result.sessionId);
+  return { sessionId: result.sessionId, url: result.url };
+}
+
+async function commandOpen(): Promise<void> {
+  const { url } = await registerPlan();
+  await openBrowser(url);
+  process.stdout.write(`${url}\n`);
+}
+
+async function commandPublish(): Promise<void> {
+  const { sessionId } = await registerPlan();
+  const published = await publishPlanToTailnet(sessionId);
   process.stdout.write(`${published.url}\n`);
 }
 

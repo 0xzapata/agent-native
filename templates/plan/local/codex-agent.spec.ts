@@ -11,6 +11,15 @@ import {
 } from "./codex-agent.js";
 
 describe("local Codex agent handoff", () => {
+  function childProcess() {
+    return Object.assign(new EventEmitter(), {
+      stdin: new PassThrough(),
+      stdout: new PassThrough(),
+      stderr: new PassThrough(),
+      kill: vi.fn(),
+    });
+  }
+
   it("closes the app-server after the submitted turn completes", async () => {
     const child = Object.assign(new EventEmitter(), {
       stdin: new PassThrough(),
@@ -54,6 +63,46 @@ describe("local Codex agent handoff", () => {
     await new Promise((resolve) => setTimeout(resolve, 0));
     client.closeAfterTurn("thread-1", "turn-1");
 
+    expect(child.kill).toHaveBeenCalledOnce();
+  });
+
+  it("rejects pending requests when app-server stdin breaks", async () => {
+    const child = childProcess();
+    const client = createCodexAgentClient(child as never);
+    const pending = client.request("initialize");
+    child.stdin.emit(
+      "error",
+      Object.assign(new Error("broken pipe"), { code: "EPIPE" }),
+    );
+
+    await expect(pending).rejects.toThrow(
+      "Codex app-server could not accept the request.",
+    );
+    expect(child.kill).toHaveBeenCalledOnce();
+  });
+
+  it("rejects oversized app-server output", async () => {
+    const child = childProcess();
+    const client = createCodexAgentClient(child as never);
+    const pending = client.request("initialize");
+    child.stdout.write("x".repeat(256 * 1024 + 1));
+
+    await expect(pending).rejects.toThrow(
+      "Codex app-server output exceeded its safety limit.",
+    );
+    expect(child.kill).toHaveBeenCalledOnce();
+  });
+
+  it("includes the bounded stderr tail in startup failures", async () => {
+    const child = childProcess();
+    const client = createCodexAgentClient(child as never);
+    const pending = client.request("initialize");
+    child.stderr.write("codex diagnostic");
+    child.emit("error", new Error("spawn failed"));
+
+    await expect(pending).rejects.toThrow(
+      "Codex CLI could not be started. codex diagnostic",
+    );
     expect(child.kill).toHaveBeenCalledOnce();
   });
 

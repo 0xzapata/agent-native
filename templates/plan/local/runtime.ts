@@ -50,7 +50,8 @@ export async function ensureRuntimeDir(): Promise<string> {
   await fs.mkdir(dir, { recursive: true, mode: 0o700 });
   const canonical = await fs.realpath(dir);
   const stat = await fs.stat(canonical);
-  if (!stat.isDirectory() || stat.uid !== process.getuid?.()) {
+  const uid = process.getuid?.();
+  if (!stat.isDirectory() || (uid !== undefined && stat.uid !== uid)) {
     throw new Error("Runtime directory must be owned by the current user.");
   }
   await fs.chmod(canonical, 0o700);

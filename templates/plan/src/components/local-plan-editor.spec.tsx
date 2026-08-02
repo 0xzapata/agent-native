@@ -105,6 +105,7 @@ function session(): LocalSession {
 
 let container: HTMLElement;
 let root: Root;
+let originalClipboard: PropertyDescriptor | undefined;
 
 async function flush() {
   await act(async () => {
@@ -122,6 +123,7 @@ function button(label: string) {
 
 beforeEach(async () => {
   vi.useFakeTimers();
+  originalClipboard = Object.getOwnPropertyDescriptor(navigator, "clipboard");
   container = document.createElement("div");
   document.body.appendChild(container);
   root = createRoot(container);
@@ -142,6 +144,11 @@ afterEach(() => {
   vi.useRealTimers();
   vi.restoreAllMocks();
   vi.clearAllMocks();
+  if (originalClipboard) {
+    Object.defineProperty(navigator, "clipboard", originalClipboard);
+  } else {
+    Reflect.deleteProperty(navigator, "clipboard");
+  }
 });
 
 describe("LocalPlanEditor", () => {
@@ -234,5 +241,33 @@ describe("LocalPlanEditor", () => {
     expect(toast.error).toHaveBeenCalledWith("Publish unavailable");
     expect(unhandled).not.toHaveBeenCalled();
     window.removeEventListener("unhandledrejection", unhandled);
+  });
+
+  it("keeps comment text when the daemon rejects the save", async () => {
+    localApi.addComment.mockRejectedValueOnce(new Error("Comment unavailable"));
+    const textarea = container.querySelector<HTMLTextAreaElement>(
+      'textarea[placeholder="Add feedback for the agent…"]',
+    );
+    expect(textarea).toBeTruthy();
+
+    act(() => {
+      const setter = Object.getOwnPropertyDescriptor(
+        HTMLTextAreaElement.prototype,
+        "value",
+      )?.set;
+      setter?.call(textarea, "Keep this draft");
+      textarea!.dispatchEvent(new Event("input", { bubbles: true }));
+    });
+    await flush();
+    await act(async () => button("Add comment").click());
+    await flush();
+
+    expect(localApi.addComment).toHaveBeenCalledWith(
+      "session-1",
+      "Keep this draft",
+      undefined,
+    );
+    expect(textarea!.value).toBe("Keep this draft");
+    expect(toast.error).toHaveBeenCalledWith("Comment unavailable");
   });
 });

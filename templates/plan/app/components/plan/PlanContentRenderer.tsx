@@ -227,10 +227,12 @@ export function PlanContentRenderer({
         : undefined,
     [collabUser?.email, collabUser?.name, collabUser?.color],
   );
+  const collaborationPlanId = localOnly ? null : planId;
+  const collaborationUser = localOnly ? null : collabUser;
   const remotePresence = usePlanPresence({
-    planId,
-    enabled: !localOnly && !!planId && !isRecap,
-    user: presenceUser,
+    planId: collaborationPlanId,
+    enabled: !!collaborationPlanId && !isRecap,
+    user: localOnly ? undefined : presenceUser,
   });
   const { activeUsers, agentPresent, agentActive, recentEdits, collabDoc } =
     localOnly ? EMPTY_PLAN_PRESENCE : remotePresence;
@@ -525,8 +527,8 @@ export function PlanContentRenderer({
       createPlanBlockRenderContext({
         textDirection: documentDirection,
         contentUpdatedAt,
-        planId,
-        collabUser,
+        planId: collaborationPlanId,
+        collabUser: collaborationUser,
         onRichTextChange: (blockId, markdown) =>
           handlersRef.current.updateRichTextBlock(blockId, markdown),
         onVisualQuestionsSubmit: (summary) =>
@@ -559,8 +561,8 @@ export function PlanContentRenderer({
                     block={block}
                     editingDisabled
                     contentUpdatedAt={contentUpdatedAt}
-                    planId={planId}
-                    collabUser={collabUser}
+                    planId={collaborationPlanId}
+                    collabUser={collaborationUser}
                   />
                 ))}
               </div>
@@ -570,8 +572,8 @@ export function PlanContentRenderer({
               key={`${containerBlockId}::${regionId}`}
               blocks={blocks as PlanBlock[]}
               contentUpdatedAt={contentUpdatedAt}
-              planId={planId}
-              collabUser={collabUser}
+              planId={collaborationPlanId}
+              collabUser={collaborationUser}
               editable={editable && !handlersRef.current.editingDisabled}
               onBlocksChange={(nextBlocks) => onChange(nextBlocks)}
               onVisualQuestionsSubmit={(summary) =>
@@ -592,8 +594,8 @@ export function PlanContentRenderer({
     [
       contentUpdatedAt,
       documentDirection,
-      planId,
-      collabUser,
+      collaborationPlanId,
+      collaborationUser,
       editingDisabled,
       notionCompatibleOnly,
       showCodeAnnotationOverlays,
@@ -902,8 +904,8 @@ export function PlanContentRenderer({
                               onVisualQuestionsSubmit={onVisualQuestionsSubmit}
                               contentUpdatedAt={contentUpdatedAt}
                               editingDisabled
-                              planId={planId}
-                              collabUser={collabUser}
+                              planId={collaborationPlanId}
+                              collabUser={collaborationUser}
                             />,
                           ),
                         )}
@@ -911,8 +913,8 @@ export function PlanContentRenderer({
                         <LazyPlanDocumentEditor
                           content={content}
                           contentUpdatedAt={contentUpdatedAt}
-                          planId={planId}
-                          collabUser={collabUser}
+                          planId={collaborationPlanId}
+                          collabUser={collaborationUser}
                           editable
                           onBlocksChange={replaceBlocks}
                           onVisualQuestionsSubmit={onVisualQuestionsSubmit}
@@ -936,8 +938,8 @@ export function PlanContentRenderer({
                             onVisualQuestionsSubmit={onVisualQuestionsSubmit}
                             contentUpdatedAt={contentUpdatedAt}
                             editingDisabled={editingDisabled}
-                            planId={planId}
-                            collabUser={collabUser}
+                            planId={collaborationPlanId}
+                            collabUser={collaborationUser}
                           />,
                         ),
                       )
@@ -957,8 +959,8 @@ export function PlanContentRenderer({
                             onVisualQuestionsSubmit={onVisualQuestionsSubmit}
                             contentUpdatedAt={contentUpdatedAt}
                             editingDisabled={editingDisabled}
-                            planId={planId}
-                            collabUser={collabUser}
+                            planId={collaborationPlanId}
+                            collabUser={collaborationUser}
                           />,
                         ),
                       )}

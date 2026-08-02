@@ -34,6 +34,7 @@ truth.
 | --- | --- |
 | `POST /api/register` | Register a validated folder; daemon-token protected |
 | `GET /api/sessions/:id` | Read MDX, state, comments, assets, and revisions |
+| `PUT /api/sessions/:id/files` | Atomically save a batch of known files with revisions |
 | `PUT /api/sessions/:id/files/:file` | Atomically save a known file with revision |
 | `GET/POST/PUT /api/sessions/:id/comments` | Read or update local comments |
 | `POST /api/sessions/:id/publish` | Publish the editor through Tailscale Serve on HTTPS 8443 |

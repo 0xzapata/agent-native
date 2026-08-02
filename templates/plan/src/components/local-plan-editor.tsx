@@ -113,13 +113,13 @@ function CommentRail({
   comments: PlanComment[];
   className?: string;
   mutating: boolean;
-  onAdd: (message: string, parentCommentId?: string) => Promise<void>;
-  onDelete: (id: string) => Promise<void>;
-  onSendToAgent: () => Promise<void>;
+  onAdd: (message: string, parentCommentId?: string) => Promise<boolean>;
+  onDelete: (id: string) => Promise<boolean>;
+  onSendToAgent: () => Promise<boolean>;
   onUpdate: (
     id: string,
     patch: Partial<Pick<PlanComment, "message" | "status">>,
-  ) => Promise<void>;
+  ) => Promise<boolean>;
   sendingToAgent: boolean;
   readOnly?: boolean;
 }) {
@@ -129,8 +129,7 @@ function CommentRail({
     event.preventDefault();
     const next = message.trim();
     if (!next || mutating) return;
-    await onAdd(next);
-    setMessage("");
+    if (await onAdd(next)) setMessage("");
   };
 
   return (
@@ -217,12 +216,12 @@ function CommentThread({
   comment: PlanComment;
   replies: PlanComment[];
   mutating: boolean;
-  onAdd: (message: string, parentCommentId?: string) => Promise<void>;
-  onDelete: (id: string) => Promise<void>;
+  onAdd: (message: string, parentCommentId?: string) => Promise<boolean>;
+  onDelete: (id: string) => Promise<boolean>;
   onUpdate: (
     id: string,
     patch: Partial<Pick<PlanComment, "message" | "status">>,
-  ) => Promise<void>;
+  ) => Promise<boolean>;
   readOnly?: boolean;
 }) {
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -242,6 +241,7 @@ function CommentThread({
         {items.map((item, index) => (
           <div
             key={item.id}
+            data-testid={index > 0 ? "comment-reply" : undefined}
             className={cn(index > 0 && "ml-4 border-l border-border pl-3")}
           >
             <div className="flex items-center gap-2 text-xs text-muted-foreground">
@@ -257,8 +257,9 @@ function CommentThread({
                   event.preventDefault();
                   const next = editMessage.trim();
                   if (!next || mutating) return;
-                  await onUpdate(item.id, { message: next });
-                  setEditingId(null);
+                  if (await onUpdate(item.id, { message: next })) {
+                    setEditingId(null);
+                  }
                 }}
               >
                 <Textarea
@@ -384,9 +385,10 @@ function CommentThread({
             event.preventDefault();
             const next = reply.trim();
             if (!next || mutating) return;
-            await onAdd(next, comment.id);
-            setReply("");
-            setReplying(false);
+            if (await onAdd(next, comment.id)) {
+              setReply("");
+              setReplying(false);
+            }
           }}
         >
           <Textarea
@@ -597,8 +599,11 @@ export function LocalPlanEditor({ sessionId }: { sessionId: string }) {
     sessionRef.current = next;
   };
 
-  const submitComment = async (message: string, parentCommentId?: string) => {
-    if (commentsMutating) return;
+  const submitComment = async (
+    message: string,
+    parentCommentId?: string,
+  ): Promise<boolean> => {
+    if (commentsMutating) return false;
     setCommentsMutating(true);
     try {
       const saved = await addComment(sessionId, message, parentCommentId);
@@ -606,17 +611,21 @@ export function LocalPlanEditor({ sessionId }: { sessionId: string }) {
       toast.success(
         parentCommentId ? "Reply saved locally" : "Comment saved locally",
       );
+      return true;
     } catch (cause) {
       toast.error(
         cause instanceof Error ? cause.message : "Could not save comment.",
       );
+      return false;
     } finally {
       setCommentsMutating(false);
     }
   };
 
-  const persistComments = async (nextComments: PlanComment[]) => {
-    if (commentsMutating) return;
+  const persistComments = async (
+    nextComments: PlanComment[],
+  ): Promise<boolean> => {
+    if (commentsMutating) return false;
     setCommentsMutating(true);
     try {
       const saved = await saveComments(
@@ -626,10 +635,12 @@ export function LocalPlanEditor({ sessionId }: { sessionId: string }) {
       );
       setCommentState(saved.comments, saved.revision);
       toast.success("Comments updated locally");
+      return true;
     } catch (cause) {
       toast.error(
         cause instanceof Error ? cause.message : "Could not update comments.",
       );
+      return false;
     } finally {
       setCommentsMutating(false);
     }
@@ -643,17 +654,19 @@ export function LocalPlanEditor({ sessionId }: { sessionId: string }) {
   const deleteComment = async (id: string) =>
     persistComments(deleteLocalComment(comments, id));
 
-  const dispatchToAgent = async () => {
-    if (sendingToAgent) return;
+  const dispatchToAgent = async (): Promise<boolean> => {
+    if (sendingToAgent) return false;
     setSendingToAgent(true);
     try {
       const { harness, threadId, url } = await sendPlanToAgent(sessionId);
       toast.success(`Sent to ${harness} task ${threadId}`);
       if (url) window.location.href = url;
+      return true;
     } catch (cause) {
       toast.error(
         cause instanceof Error ? cause.message : "Could not send to agent.",
       );
+      return false;
     } finally {
       setSendingToAgent(false);
     }
@@ -803,7 +816,8 @@ export function LocalPlanEditor({ sessionId }: { sessionId: string }) {
             className="lg:hidden"
             onClick={() => setCommentsOpen((open) => !open)}
           >
-            <IconMessageCircle className="size-4" /> {comments.length}
+            <IconMessageCircle className="size-4" />{" "}
+            {visibleLocalComments(comments).length}
           </Button>
         </div>
       </header>
@@ -875,11 +889,9 @@ export function LocalPlanEditor({ sessionId }: { sessionId: string }) {
           comments={comments}
           mutating={commentsMutating}
           onAdd={submitComment}
-          onDelete={tailnetViewer ? async () => undefined : deleteComment}
-          onSendToAgent={
-            tailnetViewer ? async () => undefined : dispatchToAgent
-          }
-          onUpdate={tailnetViewer ? async () => undefined : updateComment}
+          onDelete={tailnetViewer ? async () => false : deleteComment}
+          onSendToAgent={tailnetViewer ? async () => false : dispatchToAgent}
+          onUpdate={tailnetViewer ? async () => false : updateComment}
           sendingToAgent={sendingToAgent}
           readOnly={tailnetViewer}
         />
@@ -903,11 +915,9 @@ export function LocalPlanEditor({ sessionId }: { sessionId: string }) {
             comments={comments}
             mutating={commentsMutating}
             onAdd={submitComment}
-            onDelete={tailnetViewer ? async () => undefined : deleteComment}
-            onSendToAgent={
-              tailnetViewer ? async () => undefined : dispatchToAgent
-            }
-            onUpdate={tailnetViewer ? async () => undefined : updateComment}
+            onDelete={tailnetViewer ? async () => false : deleteComment}
+            onSendToAgent={tailnetViewer ? async () => false : dispatchToAgent}
+            onUpdate={tailnetViewer ? async () => false : updateComment}
             sendingToAgent={sendingToAgent}
             readOnly={tailnetViewer}
           />

@@ -164,7 +164,7 @@ function defaultComment(
     id:
       !remote && typeof input.id === "string" && input.id
         ? input.id
-        : `cmt_${randomUUID().replaceAll("-", "")}`,
+        : `cmt_${randomUUID().replace(/-/g, "")}`,
     planId,
     parentCommentId:
       typeof input.parentCommentId === "string" ? input.parentCommentId : null,
@@ -240,7 +240,7 @@ async function serveTanstack(
     new Request(`http://${HOST}:${PORT}${request.url ?? "/"}`, {
       method: request.method,
       headers: request.headers as HeadersInit,
-      body: requestBody,
+      body: requestBody ? Buffer.from(requestBody) : undefined,
     }),
   );
   const headers: http.OutgoingHttpHeaders = {};
@@ -305,7 +305,14 @@ async function serveStatic(
   if (!root) {
     try {
       await serveTanstack(request, response);
-    } catch {
+    } catch (error) {
+      await fs
+        .appendFile(
+          logPath(),
+          `${new Date().toISOString()} serveTanstack failed: ${String(error)}\n`,
+          { mode: 0o600 },
+        )
+        .catch(() => undefined);
       errorJson(response, 503, "Editor build is missing. Run pnpm build.");
     }
     return;
@@ -575,6 +582,7 @@ export async function startDaemon(options: {
         if (
           segments[3] === "assets" &&
           segments[4] &&
+          segments.length === 5 &&
           request.method === "GET"
         ) {
           const asset = await readAsset(root, segments[4]);
@@ -623,20 +631,25 @@ export async function startDaemon(options: {
       .finally(() => process.exit(1));
   });
   server.listen(PORT, HOST, async () => {
-    await writePrivateJson(metadataPath(), {
-      pid: process.pid,
-      token: options.token,
-      buildHash: options.buildHash,
-      host: HOST,
-      port: PORT,
-      startedAt: new Date().toISOString(),
-      logFile: logPath(),
-    });
-    await fs.appendFile(
-      logPath(),
-      `${new Date().toISOString()} listening on http://${HOST}:${PORT}\n`,
-      { mode: 0o600 },
-    );
+    try {
+      await fs.appendFile(
+        logPath(),
+        `${new Date().toISOString()} listening on http://${HOST}:${PORT}\n`,
+        { mode: 0o600 },
+      );
+      await writePrivateJson(metadataPath(), {
+        pid: process.pid,
+        token: options.token,
+        buildHash: options.buildHash,
+        host: HOST,
+        port: PORT,
+        startedAt: new Date().toISOString(),
+        logFile: logPath(),
+      });
+    } catch (error) {
+      process.stderr.write(`${String(error)}\n`);
+      process.exit(1);
+    }
   });
 
   for (const signal of ["SIGINT", "SIGTERM"] as const) {

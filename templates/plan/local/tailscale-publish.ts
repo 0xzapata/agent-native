@@ -7,12 +7,29 @@ export const TAILSCALE_HTTPS_PORT = 8443;
 
 type Execute = (command: string, args: string[]) => Promise<{ stdout: string }>;
 
-const execute: Execute = promisify(execFile);
+const execFileAsync = promisify(execFile);
+const execute: Execute = (command, args) =>
+  execFileAsync(command, args, {
+    timeout: 15_000,
+    maxBuffer: 1024 * 1024,
+  });
 
 function record(value: unknown): Record<string, unknown> {
   return value && typeof value === "object"
     ? (value as Record<string, unknown>)
     : {};
+}
+
+async function readJson(
+  run: Execute,
+  args: string[],
+): Promise<Record<string, unknown>> {
+  const { stdout } = await run("tailscale", args);
+  try {
+    return record(JSON.parse(stdout));
+  } catch {
+    throw new Error(`Could not read "tailscale ${args.join(" ")}" output.`);
+  }
 }
 
 export async function publishPlanToTailnet(
@@ -23,9 +40,7 @@ export async function publishPlanToTailnet(
     throw new Error("Invalid plan session id.");
   }
 
-  const status = record(
-    JSON.parse((await run("tailscale", ["status", "--json"])).stdout),
-  );
+  const status = await readJson(run, ["status", "--json"]);
   if (status.BackendState !== "Running") {
     throw new Error("Tailscale must be connected before publishing a plan.");
   }
@@ -35,9 +50,7 @@ export async function publishPlanToTailnet(
   }
 
   const target = `http://${HOST}:${PORT}`;
-  const serveStatus = record(
-    JSON.parse((await run("tailscale", ["serve", "status", "--json"])).stdout),
-  );
+  const serveStatus = await readJson(run, ["serve", "status", "--json"]);
   const allowFunnel = record(serveStatus.AllowFunnel);
   const existingPort = record(serveStatus.TCP)[String(TAILSCALE_HTTPS_PORT)];
   const hostname = dnsName.slice(0, -1);
@@ -67,11 +80,7 @@ export async function publishPlanToTailnet(
       `--https=${TAILSCALE_HTTPS_PORT}`,
       target,
     ]);
-    const verified = record(
-      JSON.parse(
-        (await run("tailscale", ["serve", "status", "--json"])).stdout,
-      ),
-    );
+    const verified = await readJson(run, ["serve", "status", "--json"]);
     const verifiedPort = record(verified.TCP)[String(TAILSCALE_HTTPS_PORT)];
     const verifiedHandler = record(
       record(record(verified.Web)[`${hostname}:${TAILSCALE_HTTPS_PORT}`])

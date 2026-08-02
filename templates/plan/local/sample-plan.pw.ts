@@ -45,10 +45,14 @@ test("complete local plan exercises edit, canvas, prototype, comments, asset, st
   );
   if (!sessionId) return;
   const nonLoopbackRequests: string[] = [];
+  const collaborationRequests: string[] = [];
   const context = await browser.newContext({ baseURL });
   const page = await context.newPage();
   page.on("request", (request) => {
     const url = new URL(request.url());
+    if (url.pathname.includes("/collab")) {
+      collaborationRequests.push(request.url());
+    }
     if (
       (url.protocol === "http:" || url.protocol === "https:") &&
       url.hostname !== "127.0.0.1" &&
@@ -153,7 +157,9 @@ test("complete local plan exercises edit, canvas, prototype, comments, asset, st
       .click();
     await expect(commentThread.getByText(replyText)).toBeVisible();
 
-    const replyBlock = commentThread.locator(":scope > div > div").nth(1);
+    const replyBlock = commentThread
+      .getByTestId("comment-reply")
+      .filter({ hasText: replyText });
     await replyBlock.getByTitle("Edit comment").click();
     await commentThread
       .getByRole("textbox", { name: "Edit comment" })
@@ -205,13 +211,14 @@ test("complete local plan exercises edit, canvas, prototype, comments, asset, st
     await expect(page.getByText(editedReplyText)).toBeVisible();
     await expect(page.locator(".plan-canvas-zoom span")).toContainText("72%");
     expect(nonLoopbackRequests).toEqual([]);
+    expect(collaborationRequests).toEqual([]);
 
     const reloadedThread = page
       .locator("article")
       .filter({ hasText: commentText });
     const reloadedReplyBlock = reloadedThread
-      .locator(":scope > div > div")
-      .nth(1);
+      .getByTestId("comment-reply")
+      .filter({ hasText: editedReplyText });
     await reloadedReplyBlock.getByTitle("Delete comment").click();
     await page.getByRole("button", { name: "Delete", exact: true }).click();
     await expect(page.getByText(editedReplyText)).toHaveCount(0);

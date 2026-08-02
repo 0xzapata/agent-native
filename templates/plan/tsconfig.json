@@ -11,6 +11,7 @@
     }
   },
   "include": [
+    "local/**/*",
     "src/**/*",
     "app/components/**/*",
     "app/design-system.ts",
